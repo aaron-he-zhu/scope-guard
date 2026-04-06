@@ -1,12 +1,23 @@
 ---
 name: preflight
-description: "Scope guard — use when editing files, running destructive commands, pushing code, deleting resources, or when scope is ambiguous. Generates a scope boundary to prevent drift, surface assumptions, and enforce risk-based approval gates for agentic tasks."
+description: "Scope guard and safety check — use when editing files, running destructive commands, pushing code, deleting resources, limiting agent scope, or when scope is ambiguous. Generates a scope boundary to prevent drift, surface assumptions, and enforce risk-based approval gates."
 ---
 
 # Preflight Scope Guard
 
 Prevent scope drift, surface hidden assumptions, and enforce risk-based approval
 gates — before executing any task that modifies state.
+
+## Activation scope
+
+To restrict this skill to specific directories (e.g. in a monorepo), add a
+`paths` field to the frontmatter above:
+
+```yaml
+paths: "packages/backend/**"
+```
+
+When omitted, the skill activates globally for any matching request.
 
 ## When to activate
 
