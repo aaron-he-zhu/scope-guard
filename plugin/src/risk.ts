@@ -125,7 +125,7 @@ export function builtinRules(): RiskRule[] {
     new RiskRule({
       name: "secret_files",
       tool: "*",
-      pattern: "\\.(env|pem|key|secret|credentials|password)([\"'\\s}]|$)",
+      pattern: "\\.(env|pem|key|secret|credentials)([\"'\\s}]|$)",
       risk: RiskLevel.HIGH,
       description: "Accessing secret or credential files",
     }),
@@ -161,7 +161,7 @@ export function builtinRules(): RiskRule[] {
     new RiskRule({
       name: "network_read",
       tool: "Bash",
-      pattern: "\\b(curl|wget|http|fetch)\\b",
+      pattern: "\\b(curl|wget|http)\\b",
       risk: RiskLevel.MEDIUM,
       description: "Network read operations",
     }),
@@ -173,7 +173,7 @@ export function builtinRules(): RiskRule[] {
       description: "Installing packages",
     }),
     new RiskRule({
-      name: "git_destructive",
+      name: "git_checkout_discard",
       tool: "Bash",
       pattern: "git\\s+(checkout\\s+--\\s|restore\\s|clean\\s+-f|branch\\s+-D)",
       risk: RiskLevel.MEDIUM,

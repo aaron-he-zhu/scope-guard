@@ -6,7 +6,6 @@ license: MIT
 compatibility: "Works with Claude Code, OpenClaw, and any AgentSkills-compatible agent. No external binaries or API keys required."
 metadata:
   author: preflight-scope
-  version: "1.0.0"
   tags: "scope-guard,safety,risk,approval-gate,drift-prevention,guardrail,permission,boundary"
   openclaw:
     emoji: "🛡️"

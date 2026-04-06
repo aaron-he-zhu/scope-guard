@@ -61,50 +61,59 @@ export default definePluginEntry({
     api.registerHook(
       "before_tool_call",
       async (event: BeforeToolCallEvent) => {
-        const config = api.getConfig();
-        const workspacePath = api.getWorkspacePath();
-
-        // Resolve paths from config or defaults
-        const scopePath = config.scopePath
-          ? join(workspacePath, config.scopePath)
-          : join(workspacePath, ".claude", "scope-boundary.json");
-
-        const auditLogPath = config.auditLogPath
-          ? join(workspacePath, config.auditLogPath)
-          : join(workspacePath, ".claude", "preflight-audit.jsonl");
-
-        // Load scope boundary
-        const boundary = ScopeBoundary.load(scopePath);
-
-        // Build risk engine (builtin rules only in plugin mode)
-        const engine = RiskEngine.default();
-
-        // Run scope check
-        const checker = new ScopeChecker(boundary, engine);
-        const result = checker.check(event.toolName, event.params);
-
-        // Write audit log
         try {
-          const audit = new AuditLog(auditLogPath);
-          audit.record(result);
-        } catch (e) {
-          console.error(`[preflight] audit write failed: ${e}`);
-        }
+          const config = api.getConfig();
+          const workspacePath = api.getWorkspacePath();
 
-        // Map verdict to OpenClaw hook semantics
-        switch (result.verdict) {
-          case CheckVerdict.BLOCK:
-            return {
-              block: true,
-              blockReason: `[preflight] BLOCKED: ${result.reason} (target: ${result.target})`,
-            };
-          case CheckVerdict.WARN:
-            return {
-              requireApproval: true,
-            };
-          case CheckVerdict.ALLOW:
-          default:
-            return {};
+          // Resolve paths from config or defaults
+          const scopePath = config.scopePath
+            ? join(workspacePath, config.scopePath)
+            : join(workspacePath, ".claude", "scope-boundary.json");
+
+          const auditLogPath = config.auditLogPath
+            ? join(workspacePath, config.auditLogPath)
+            : join(workspacePath, ".claude", "preflight-audit.jsonl");
+
+          // Load scope boundary
+          const boundary = ScopeBoundary.load(scopePath);
+
+          // Build risk engine (builtin rules only in plugin mode)
+          const engine = RiskEngine.default();
+
+          // Run scope check
+          const checker = new ScopeChecker(boundary, engine);
+          const result = checker.check(event.toolName, event.params);
+
+          // Write audit log
+          try {
+            const audit = new AuditLog(auditLogPath);
+            audit.record(result);
+          } catch (e) {
+            console.error(`[preflight] audit write failed: ${e}`);
+          }
+
+          // Map verdict to OpenClaw hook semantics
+          switch (result.verdict) {
+            case CheckVerdict.BLOCK:
+              return {
+                block: true,
+                blockReason: `[preflight] BLOCKED: ${result.reason} (target: ${result.target})`,
+              };
+            case CheckVerdict.WARN:
+              return {
+                requireApproval: true,
+              };
+            case CheckVerdict.ALLOW:
+            default:
+              return {};
+          }
+        } catch (e) {
+          // Safety tool must fail closed — block on internal errors
+          console.error(`[preflight] internal error: ${e}`);
+          return {
+            block: true,
+            blockReason: "[preflight] internal error — fail closed",
+          };
         }
       },
       {
