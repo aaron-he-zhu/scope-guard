@@ -1,0 +1,44 @@
+{
+  "goal": "Prepare an email draft to send the updated contract to the client",
+  "scope": "Draft the outbound email and identify the attachment to use; do not send the email without explicit approval",
+  "constraints": [
+    "Use a professional client-facing tone",
+    "Do not send or schedule the email",
+    "Do not attach any file that is not clearly identified as the latest intended contract version",
+    "Keep the message concise and action-oriented"
+  ],
+  "success_criteria": [
+    "Produces a send-ready email draft",
+    "Clearly identifies the intended recipient and attachment requirements",
+    "Stops before send",
+    "Surfaces any ambiguity about recipient, version, or destination"
+  ],
+  "inputs": {
+    "provided": [
+      "Updated contract file",
+      "Client thread context if available"
+    ],
+    "missing": [
+      "Recipient confirmation if not explicit",
+      "Confirmation that the provided contract is the correct final version"
+    ]
+  },
+  "assumptions": [
+    "Assume the task is draft-first rather than send-now",
+    "Assume the latest uploaded contract is the intended attachment candidate unless contradicted",
+    "Assume user review is required before external send"
+  ],
+  "risk_level": "high",
+  "approval_required": true,
+  "requested_output": "email_draft",
+  "next_actor": "action-adapter",
+  "task_type": [
+    "external_communication",
+    "document_delivery"
+  ],
+  "audience": "client",
+  "priority": "high",
+  "stage": "approval_pending",
+  "completion_definition": "Done when a send-ready email draft is prepared, the intended attachment is identified, and the system is waiting for user approval before sending",
+  "fallback_if_blocked": "If recipient or final contract version is unclear, prepare the draft body and explicitly request confirmation before execution"
+}

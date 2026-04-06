@@ -1,0 +1,87 @@
+# Preflight default risk rules
+# Risk levels: low, medium, high
+# Each rule matches a tool + regex pattern against the serialised params.
+# The highest matching risk level wins.
+
+rules:
+  # ============ HIGH RISK ============
+
+  - name: destructive_rm
+    tool: Bash
+    pattern: '\brm\s+(-rf|-r\s|--recursive)'
+    risk: high
+    description: Recursive file deletion
+
+  - name: force_push
+    tool: Bash
+    pattern: 'git\s+push\s+.*--force'
+    risk: high
+    description: Force push overwrites remote history
+
+  - name: git_reset_hard
+    tool: Bash
+    pattern: 'git\s+reset\s+--hard'
+    risk: high
+    description: Hard reset discards all uncommitted changes
+
+  - name: drop_database
+    tool: Bash
+    pattern: '\b(drop\s+table|drop\s+database|truncate\s+table)\b'
+    risk: high
+    description: Database destructive operations
+
+  - name: secret_files
+    tool: "*"
+    pattern: '\.(env|pem|key|secret|credentials)([\"''\s}]|$)'
+    risk: high
+    description: Accessing secret or credential files
+
+  - name: npm_publish
+    tool: Bash
+    pattern: '\bnpm\s+publish\b'
+    risk: high
+    description: Publishing to npm registry
+
+  - name: docker_push
+    tool: Bash
+    pattern: '\bdocker\s+push\b'
+    risk: high
+    description: Pushing docker images to registry
+
+  - name: curl_mutate
+    tool: Bash
+    pattern: 'curl\s+.*-X\s*(POST|PUT|DELETE|PATCH)'
+    risk: high
+    description: HTTP mutation via curl
+
+  # ============ MEDIUM RISK ============
+
+  - name: write_file
+    tool: Write
+    pattern: '.'
+    risk: medium
+    description: Creating or overwriting a file
+
+  - name: network_read
+    tool: Bash
+    pattern: '\b(curl|wget|http)\b'
+    risk: medium
+    description: Network read operations
+
+  - name: package_install
+    tool: Bash
+    pattern: '\b(pip\s+install|npm\s+install|yarn\s+add|brew\s+install)\b'
+    risk: medium
+    description: Installing packages
+
+  - name: git_checkout_discard
+    tool: Bash
+    pattern: 'git\s+(checkout\s+--\s|restore\s|clean\s+-f|branch\s+-D)'
+    risk: medium
+    description: Git operations that may discard work
+
+  - name: chmod_chown
+    tool: Bash
+    pattern: '\b(chmod|chown)\b'
+    risk: medium
+    description: Changing file permissions or ownership

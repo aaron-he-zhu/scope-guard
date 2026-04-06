@@ -1,0 +1,27 @@
+{
+  "status": "awaiting_approval",
+  "result_type": "action_preview",
+  "artifacts": [
+    {
+      "type": "email_draft",
+      "title": "Client Contract Email Draft",
+      "location": "inline://client-contract-email-draft"
+    },
+    {
+      "type": "attachment_candidate",
+      "title": "Updated Contract File",
+      "location": "file://updated-contract.pdf"
+    }
+  ],
+  "summary": "Prepared a send-ready client email draft and identified the intended attachment candidate, but stopped before sending because approval is required for external communication.",
+  "open_questions": [
+    "Please confirm the recipient",
+    "Please confirm that the identified contract file is the final version to send"
+  ],
+  "assumptions_used": [
+    "Assumed the task should stop at draft stage rather than send immediately",
+    "Assumed the latest provided contract file is the intended attachment candidate unless corrected"
+  ],
+  "approval_pending": true,
+  "next_recommended_action": "Review the draft, confirm recipient and attachment version, then explicitly approve send if desired"
+}

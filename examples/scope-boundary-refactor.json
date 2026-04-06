@@ -1,0 +1,24 @@
+{
+  "files_in_scope": [],
+  "dirs_in_scope": [
+    "src/api/",
+    "tests/api/"
+  ],
+  "assumptions": [
+    {
+      "text": "All API endpoints currently return JSON (no XML or plain text responses)",
+      "verified": true,
+      "verification_method": "grep for Content-Type in src/api/ found only application/json"
+    },
+    {
+      "text": "The API tests use pytest fixtures for HTTP client setup",
+      "verified": true,
+      "verification_method": "grep for @pytest.fixture in tests/api/"
+    }
+  ],
+  "risk_level": "medium",
+  "approval_required": false,
+  "task_summary": "Refactor API layer to use standardised response envelope",
+  "created_at": "2026-04-06T10:00:00+0800",
+  "revisions": []
+}

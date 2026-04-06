@@ -1,0 +1,20 @@
+{
+  "status": "partial",
+  "result_type": "document_partial",
+  "artifacts": [
+    {
+      "type": "memo_outline",
+      "title": "Partial Memo Outline",
+      "location": "inline://partial-memo-outline"
+    }
+  ],
+  "summary": "Produced a partial memo outline from the available materials, but a complete draft could not be finished because the source notes were incomplete.",
+  "open_questions": [
+    "Please provide the missing interview notes or confirm whether the outline should be expanded with assumptions"
+  ],
+  "assumptions_used": [
+    "Assumed a generic memo structure while leaving content placeholders for missing evidence"
+  ],
+  "approval_pending": false,
+  "next_recommended_action": "Provide missing materials to complete the full memo draft"
+}

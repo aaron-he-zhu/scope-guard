@@ -1,0 +1,23 @@
+{
+  "files_in_scope": [
+    "deploy/docker-compose.yml",
+    "deploy/nginx.conf",
+    ".github/workflows/deploy.yml"
+  ],
+  "dirs_in_scope": [],
+  "assumptions": [
+    {
+      "text": "Production deployment uses docker-compose, not Kubernetes",
+      "verified": false
+    },
+    {
+      "text": "The deploy workflow has manual approval step before production",
+      "verified": false
+    }
+  ],
+  "risk_level": "high",
+  "approval_required": true,
+  "task_summary": "Update deployment config to add health check endpoint",
+  "created_at": "2026-04-06T10:00:00+0800",
+  "revisions": []
+}

@@ -1,0 +1,13 @@
+{
+  "status": "blocked",
+  "result_type": "action_blocked",
+  "artifacts": [],
+  "summary": "The requested external action could not proceed because the recipient and final destination were not sufficiently identified.",
+  "open_questions": [
+    "Who is the exact recipient?",
+    "Which final document version should be used?"
+  ],
+  "assumptions_used": [],
+  "approval_pending": false,
+  "next_recommended_action": "Provide the recipient and confirm the final attachment version so a draft can be prepared safely"
+}

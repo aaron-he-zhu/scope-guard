@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.claude/scope-boundary.json
+.claude/preflight-audit.jsonl
+.claude/preflight-rules.yaml
+*.egg
+.eggs/
