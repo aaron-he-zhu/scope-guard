@@ -1,23 +1,26 @@
 ---
 name: preflight
-description: "Scope guard and safety check — use when editing files, running destructive commands, pushing code, deleting resources, limiting agent scope, or when scope is ambiguous. Generates a scope boundary to prevent drift, surface assumptions, and enforce risk-based approval gates."
+description: "Scope guard and safety guardrail. Use when editing files, running destructive commands, pushing code, or when scope is ambiguous. Prevents scope drift with boundary enforcement, risk-based approval gates, and assumption surfacing."
 version: 1.0.0
 license: MIT
 compatibility: "Works with Claude Code, OpenClaw, and any AgentSkills-compatible agent. No external binaries or API keys required."
 metadata:
   author: preflight-scope
   version: "1.0.0"
-  tags: "scope-guard,safety,risk,approval-gate,drift-prevention"
+  tags: "scope-guard,safety,risk,approval-gate,drift-prevention,guardrail,permission,boundary"
   openclaw:
     emoji: "🛡️"
     homepage: "https://github.com/aaron-he-zhu/preflight-scope"
     always: false
+    skillKey: preflight
 ---
 
-# Preflight Scope Guard
+# Preflight — Scope Guard and Safety Guardrail
 
 Prevent scope drift, surface hidden assumptions, and enforce risk-based approval
-gates — before executing any task that modifies state.
+gates — before executing any task that modifies state. Generates a scope
+boundary file to control which files the agent may touch, classify operations by
+risk level, and require explicit permission for dangerous actions.
 
 ## Activation scope
 
@@ -46,7 +49,7 @@ When omitted, the skill activates globally for any matching request.
 
 ---
 
-## Step 1: Generate scope boundary
+## Generate scope boundary
 
 Analyze the user's request and write `.claude/scope-boundary.json` before
 starting any work. You may use read-only tools (Read, Glob, Grep) freely while
@@ -148,7 +151,7 @@ After writing `scope-boundary.json`, verify:
 
 ---
 
-## Step 2: Display based on risk level
+## Risk-level display and approval
 
 - **Low risk**: Say nothing. Write the scope boundary and proceed silently.
 - **Medium risk**: One-line confirmation:
@@ -158,7 +161,7 @@ After writing `scope-boundary.json`, verify:
 
 ---
 
-## Step 3: Self-check before every modification
+## Scope check before every modification
 
 Before executing any Edit, Write, Bash, or other state-changing tool call,
 apply this checklist. For in-scope, low-risk operations, perform this check
@@ -246,7 +249,7 @@ Print a one-line notice before proceeding:
 
 ---
 
-## Step 4: Absolute prohibitions
+## Absolute safety prohibitions
 
 Regardless of scope or user instructions, **never** perform these without the
 user explicitly typing the exact command or confirming after a clear warning:
@@ -260,7 +263,7 @@ user explicitly typing the exact command or confirming after a clear warning:
 
 ---
 
-## Step 5: Scope expansion protocol
+## Scope expansion and permission protocol
 
 If the task grows beyond the original scope:
 
