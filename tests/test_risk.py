@@ -1,6 +1,6 @@
 """Tests for RiskEngine."""
 
-from preflight.risk import RiskEngine, RiskLevel, RiskRule
+from scope_guard.risk import RiskEngine, RiskLevel, RiskRule
 
 
 class TestBuiltinRules:

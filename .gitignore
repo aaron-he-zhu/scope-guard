@@ -6,8 +6,8 @@ dist/
 build/
 .pytest_cache/
 .claude/scope-boundary.json
-.claude/preflight-audit.jsonl
-.claude/preflight-rules.yaml
+.claude/scope-guard-audit.jsonl
+.claude/scope-guard-rules.yaml
 *.egg
 .eggs/
 .coverage

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from preflight.checker import CheckResult
+from scope_guard.checker import CheckResult
 
 
 @dataclass
@@ -41,7 +41,7 @@ class AuditLog:
 
     @classmethod
     def default(cls) -> AuditLog:
-        return cls(Path.cwd() / ".claude" / "preflight-audit.jsonl")
+        return cls(Path.cwd() / ".claude" / "scope-guard-audit.jsonl")
 
     def record(self, result: CheckResult) -> None:
         entry = AuditEntry(

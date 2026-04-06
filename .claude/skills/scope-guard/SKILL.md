@@ -5,7 +5,7 @@ version: 1.0.0
 license: MIT
 compatibility: "Works with Claude Code, OpenClaw, and any AgentSkills-compatible agent. No external binaries or API keys required."
 metadata:
-  author: preflight-scope
+  author: scope-guard
   tags: "scope-guard,safety,risk,approval-gate,drift-prevention,guardrail,permission,boundary"
   openclaw:
     emoji: "🛡️"
@@ -321,8 +321,8 @@ deterministic pattern matching and an append-only audit trail, install the full
 scope-guard package:
 
 ```bash
-pip install preflight-scope==0.1.0
-preflight init
+pip install scope-guard==0.1.0
+scope-guard init
 ```
 
 Then add to `.claude/settings.json` (Claude Code) or configure a pre-tool hook
@@ -334,7 +334,7 @@ in your agent:
     "PreToolUse": [
       {
         "matcher": "",
-        "hooks": [{"type": "command", "command": "python -m preflight.checker"}]
+        "hooks": [{"type": "command", "command": "python -m scope_guard.checker"}]
       }
     ]
   }

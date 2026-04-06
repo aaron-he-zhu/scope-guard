@@ -3,9 +3,9 @@
 import tempfile
 from pathlib import Path
 
-from preflight.audit import AuditLog
-from preflight.checker import CheckResult, CheckVerdict
-from preflight.risk import RiskLevel
+from scope_guard.audit import AuditLog
+from scope_guard.checker import CheckResult, CheckVerdict
+from scope_guard.risk import RiskLevel
 
 
 class TestAuditLog:

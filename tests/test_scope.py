@@ -4,7 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from preflight.scope import ScopeBoundary, Assumption, RiskLevel
+from scope_guard.scope import ScopeBoundary, Assumption, RiskLevel
 
 
 class TestScopeBoundary:

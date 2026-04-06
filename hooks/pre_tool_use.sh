@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Preflight PreToolUse hook for Claude Code.
+# Scope Guard PreToolUse hook for Claude Code.
 # Reads tool call JSON from stdin, runs the scope checker, and exits
 # with the appropriate code (0=allow, 1=warn, 2=block).
 #
@@ -8,4 +8,4 @@
 set -euo pipefail
 
 # Pass stdin through to the Python checker.
-python -m preflight.checker
+python -m scope_guard.checker

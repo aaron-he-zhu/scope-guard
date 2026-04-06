@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
-from preflight.risk import RiskLevel
+from scope_guard.risk import RiskLevel
 
 
 @dataclass

@@ -9,8 +9,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from preflight.risk import RiskEngine, RiskLevel
-from preflight.scope import ScopeBoundary
+from scope_guard.risk import RiskEngine, RiskLevel
+from scope_guard.scope import ScopeBoundary
 
 
 class CheckVerdict(str, Enum):
@@ -220,11 +220,11 @@ def hook_main() -> None:
 
     # Write audit log.
     try:
-        from preflight.audit import AuditLog
+        from scope_guard.audit import AuditLog
         audit = AuditLog.default()
         audit.record(result)
     except Exception as exc:
-        print(f"[preflight] audit write failed: {exc}", file=sys.stderr)
+        print(f"[scope-guard] audit write failed: {exc}", file=sys.stderr)
 
     print(json.dumps(result.to_dict()))
 

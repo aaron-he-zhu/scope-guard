@@ -1,4 +1,4 @@
-"""CLI entry point: `preflight init`, `preflight status`, `preflight check`."""
+"""CLI entry point: `scope-guard init`, `scope-guard status`, `scope-guard check`."""
 
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ SKILL_DIR_NAME = "skill"
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="preflight",
+        prog="scope-guard",
         description="Scope guard for agentic AI systems.",
     )
     sub = parser.add_subparsers(dest="command")
 
     # init
-    init_p = sub.add_parser("init", help="Set up preflight in the current project")
+    init_p = sub.add_parser("init", help="Set up scope-guard in the current project")
     init_p.add_argument("--force", action="store_true", help="Overwrite existing config")
 
     # status
@@ -58,12 +58,12 @@ def _cmd_init(args: argparse.Namespace) -> None:
     if scope_path.exists() and not args.force:
         print(f"  {scope_path} already exists (use --force to overwrite)")
     else:
-        from preflight.scope import ScopeBoundary
+        from scope_guard.scope import ScopeBoundary
         ScopeBoundary().save(scope_path)
         print(f"  Created {scope_path}")
 
     # 2. Copy default risk rules
-    rules_dst = claude_dir / "preflight-rules.yaml"
+    rules_dst = claude_dir / "scope-guard-rules.yaml"
     rules_src = Path(__file__).parent / "rules" / "default.yaml"
     if rules_dst.exists() and not args.force:
         print(f"  {rules_dst} already exists (use --force to overwrite)")
@@ -97,7 +97,7 @@ def _cmd_init(args: argparse.Namespace) -> None:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": "python -m preflight.checker",
+                            "command": "python -m scope_guard.checker",
                         }
                     ],
                 }
@@ -106,7 +106,7 @@ def _cmd_init(args: argparse.Namespace) -> None:
     }
     print(f"  {json.dumps(hook_config, indent=2)}")
     print()
-    print("  Done. Run `preflight status` to verify setup.")
+    print("  Done. Run `scope-guard status` to verify setup.")
 
 
 # ---------------------------------------------------------------------------
@@ -114,13 +114,13 @@ def _cmd_init(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 def _cmd_status() -> None:
-    from preflight.scope import ScopeBoundary
-    from preflight.audit import AuditLog
+    from scope_guard.scope import ScopeBoundary
+    from scope_guard.audit import AuditLog
 
     scope_path = Path(CLAUDE_DIR) / SCOPE_FILE
     boundary = ScopeBoundary.load(scope_path)
 
-    print("=== Preflight Status ===")
+    print("=== Scope Guard Status ===")
     print()
 
     if boundary.is_empty:
@@ -165,9 +165,9 @@ def _cmd_status() -> None:
 # ---------------------------------------------------------------------------
 
 def _cmd_check(args: argparse.Namespace) -> None:
-    from preflight.scope import ScopeBoundary
-    from preflight.risk import RiskEngine
-    from preflight.checker import ScopeChecker
+    from scope_guard.scope import ScopeBoundary
+    from scope_guard.risk import RiskEngine
+    from scope_guard.checker import ScopeChecker
 
     scope_path = Path(CLAUDE_DIR) / SCOPE_FILE
     boundary = ScopeBoundary.load(scope_path)

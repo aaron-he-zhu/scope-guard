@@ -1,8 +1,8 @@
 """Tests for ScopeChecker."""
 
-from preflight.checker import ScopeChecker, CheckVerdict
-from preflight.risk import RiskEngine, RiskLevel
-from preflight.scope import ScopeBoundary
+from scope_guard.checker import ScopeChecker, CheckVerdict
+from scope_guard.risk import RiskEngine, RiskLevel
+from scope_guard.scope import ScopeBoundary
 
 
 class TestReadOnlyTools:
