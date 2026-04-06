@@ -1,6 +1,17 @@
 ---
 name: preflight
 description: "Scope guard and safety check — use when editing files, running destructive commands, pushing code, deleting resources, limiting agent scope, or when scope is ambiguous. Generates a scope boundary to prevent drift, surface assumptions, and enforce risk-based approval gates."
+version: 1.0.0
+license: MIT
+compatibility: "Works with Claude Code, OpenClaw, and any AgentSkills-compatible agent. No external binaries or API keys required."
+metadata:
+  author: preflight-scope
+  version: "1.0.0"
+  tags: "scope-guard,safety,risk,approval-gate,drift-prevention"
+  openclaw:
+    emoji: "🛡️"
+    homepage: "https://github.com/aaron-he-zhu/preflight-scope"
+    always: false
 ---
 
 # Preflight Scope Guard
@@ -263,6 +274,39 @@ Scope **never** expands silently. The user must be aware of every expansion.
 
 ---
 
+## Installation
+
+This skill follows the [Agent Skills](https://agentskills.io) open standard and
+works across Claude Code, OpenClaw, and any compatible agent.
+
+### Claude Code
+
+```bash
+# Option A: copy manually
+mkdir -p .claude/skills/preflight
+cp SKILL.md .claude/skills/preflight/
+
+# Option B: via skills.sh
+npx skills add aaron-he-zhu/preflight-scope
+```
+
+### OpenClaw / ClawHub
+
+```bash
+# From ClawHub registry
+openclaw skills install preflight
+
+# Or via clawhub CLI
+clawhub install preflight
+```
+
+### Any AgentSkills-compatible agent
+
+Copy the `preflight/` directory (containing this `SKILL.md`) into your agent's
+skills folder.
+
+---
+
 ## Upgrade to hard enforcement
 
 This skill provides **prompt-level** scope control — it guides the model's
@@ -275,7 +319,8 @@ pip install preflight-scope
 preflight init
 ```
 
-Then add to `.claude/settings.json`:
+Then add to `.claude/settings.json` (Claude Code) or configure a pre-tool hook
+in your agent:
 
 ```json
 {
