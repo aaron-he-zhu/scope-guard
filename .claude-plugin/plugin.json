@@ -1,0 +1,15 @@
+{
+  "name": "preflight-scope",
+  "version": "0.1.0",
+  "description": "Scope guard with boundary enforcement, risk-based approval gates, and audit trail",
+  "author": {
+    "name": "aaron-he-zhu",
+    "url": "https://github.com/aaron-he-zhu"
+  },
+  "homepage": "https://github.com/aaron-he-zhu/preflight-scope",
+  "repository": "https://github.com/aaron-he-zhu/preflight-scope",
+  "license": "MIT",
+  "keywords": ["scope-guard", "safety", "guardrail", "risk", "approval-gate", "drift-prevention"],
+  "skills": "./.claude/skills/",
+  "hooks": "./hooks/hooks.json"
+}

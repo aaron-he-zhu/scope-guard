@@ -13,3 +13,5 @@ build/
 .coverage
 .venv/
 .mypy_cache/
+node_modules/
+package-lock.json

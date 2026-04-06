@@ -1,0 +1,30 @@
+{
+  "id": "preflight",
+  "name": "Preflight Scope Guard",
+  "description": "Scope guard with boundary enforcement, risk-based approval gates, and audit trail. Prevents scope drift before every tool call.",
+  "version": "0.1.0",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "scopePath": {
+        "type": "string",
+        "description": "Path to scope-boundary.json (default: .claude/scope-boundary.json)"
+      },
+      "rulesPath": {
+        "type": "string",
+        "description": "Path to custom risk rules YAML (default: built-in rules)"
+      },
+      "auditLogPath": {
+        "type": "string",
+        "description": "Path to audit log JSONL (default: .claude/preflight-audit.jsonl)"
+      }
+    }
+  },
+  "uiHints": {
+    "scopePath": { "label": "Scope boundary file", "placeholder": ".claude/scope-boundary.json" },
+    "rulesPath": { "label": "Custom rules file", "placeholder": ".claude/preflight-rules.yaml" },
+    "auditLogPath": { "label": "Audit log file", "placeholder": ".claude/preflight-audit.jsonl" }
+  }
+}
