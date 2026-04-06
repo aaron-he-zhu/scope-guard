@@ -141,15 +141,17 @@ export class ScopeBoundary {
 
 /**
  * Normalise a file path for comparison.
- * Always produces a relative path so that scope boundaries declared with
- * relative paths cannot be bypassed using absolute paths (#2).
+ * Always produces a forward-slash relative path so that scope boundaries
+ * declared with relative paths cannot be bypassed using absolute paths,
+ * backslash paths, or URL-encoded segments.
  */
 export function normalisePath(p: string): string {
-  const cleaned = p.trim().replace(/\/+$/, "");
+  // Normalise backslashes to forward slashes (prevents Windows bypass)
+  const cleaned = p.trim().replace(/\\/g, "/").replace(/\/+$/, "");
   // Strip leading slash to force relative comparison
   const relative = cleaned.replace(/^\/+/, "");
   const normalised = normalize(relative);
   // Block path traversal — if result escapes root it's suspicious
-  if (normalised.startsWith("..")) return "__blocked__";
+  if (normalised.startsWith("..") || normalised.includes("/../")) return "__blocked__";
   return normalised;
 }

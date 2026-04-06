@@ -31,15 +31,17 @@ PreToolUse hook (every tool call)
     +-- High risk            ->  BLOCK (confirm first)
 ```
 
-## Install
+## Quickstart
 
 ```bash
+# 1. Install
 npm install scope-guard
-```
 
-Then add the hook to `.claude/settings.json`:
+# 2. Build
+npm run build
 
-```json
+# 3. Add hook to .claude/settings.json
+cat <<'EOF' >> .claude/settings.json
 {
   "hooks": {
     "PreToolUse": [
@@ -50,6 +52,9 @@ Then add the hook to `.claude/settings.json`:
     ]
   }
 }
+EOF
+
+# 4. Done — every tool call is now guarded
 ```
 
 Or install the SKILL.md only (prompt-level, no code hook):
@@ -92,6 +97,10 @@ Every scope check is logged to `.claude/scope-guard-audit.jsonl`:
 1. **Invisible when possible.** Low-risk, in-scope work proceeds without interruption.
 2. **Code enforces, not prompts.** Risk rules run as a Node.js hook — not as LLM instructions that can be ignored.
 3. **Scope only expands with consent.** The agent cannot unilaterally broaden its own scope.
+
+## Issues & feedback
+
+Report bugs or request features at [github.com/aaron-he-zhu/preflight-scope/issues](https://github.com/aaron-he-zhu/preflight-scope/issues).
 
 ## License
 

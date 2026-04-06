@@ -143,6 +143,15 @@ describe("ScopeBoundary", () => {
     assert.equal(normalisePath("../../etc/passwd"), "__blocked__");
   });
 
+  it("normalise blocks backslash traversal", () => {
+    assert.equal(normalisePath("src\\..\\..\\etc\\passwd"), "__blocked__");
+  });
+
+  it("normalise converts backslashes to forward slashes", () => {
+    const b = new ScopeBoundary({ dirs_in_scope: ["src/auth/"] });
+    assert.equal(b.isFileInScope("src\\auth\\login.ts"), true);
+  });
+
   it("expand scope", () => {
     const b = new ScopeBoundary({ files_in_scope: ["a.ts"] });
     b.expandScope(["b.ts"], undefined, "test");
@@ -521,5 +530,89 @@ describe("index.ts plugin", () => {
     const result = await handler({ toolName: "Read", toolCallId: "3", params: {} });
     assert.equal(result.block, true);
     assert.ok((result.blockReason as string).includes("fail closed"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mutation resilience & boundary tests
+// ---------------------------------------------------------------------------
+
+describe("mutation resilience", () => {
+  const boundary = new ScopeBoundary({
+    files_in_scope: ["src/auth/login.ts"],
+    dirs_in_scope: ["src/auth/"],
+  });
+  const checker = new ScopeChecker(boundary);
+
+  // Verdict boundaries — flipping > to >= or < to <= should fail these
+  it("MEDIUM risk is WARN not ALLOW", () => {
+    const r = checker.check("Bash", { command: "curl http://x" });
+    assert.equal(r.verdict, CheckVerdict.WARN);
+    assert.notEqual(r.verdict, CheckVerdict.ALLOW);
+  });
+
+  it("HIGH risk is BLOCK not WARN", () => {
+    const r = checker.check("Bash", { command: "rm -rf /" });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+    assert.notEqual(r.verdict, CheckVerdict.WARN);
+  });
+
+  it("LOW risk is ALLOW not WARN", () => {
+    const r = checker.check("Bash", { command: "ls" });
+    assert.equal(r.verdict, CheckVerdict.ALLOW);
+    assert.notEqual(r.verdict, CheckVerdict.WARN);
+  });
+
+  // Out-of-scope: low risk must WARN (not ALLOW)
+  it("out-of-scope low-risk Edit is WARN not ALLOW", () => {
+    const r = checker.check("Edit", { file_path: "src/api/routes.ts" });
+    assert.equal(r.verdict, CheckVerdict.WARN);
+    assert.equal(r.scope_violation, true);
+  });
+
+  // Out-of-scope: high risk must BLOCK (not WARN)
+  it("out-of-scope high-risk Edit is BLOCK not WARN", () => {
+    const r = checker.check("Edit", { file_path: ".env" });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+    assert.notEqual(r.verdict, CheckVerdict.WARN);
+  });
+
+  // riskOrd must strictly increase — detects flipped comparisons
+  it("riskOrd LOW < MEDIUM < HIGH strictly", () => {
+    assert.ok(riskOrd(RiskLevel.LOW) < riskOrd(RiskLevel.MEDIUM));
+    assert.ok(riskOrd(RiskLevel.MEDIUM) < riskOrd(RiskLevel.HIGH));
+    assert.ok(riskOrd(RiskLevel.LOW) < riskOrd(RiskLevel.HIGH));
+    // Not equal
+    assert.notEqual(riskOrd(RiskLevel.LOW), riskOrd(RiskLevel.MEDIUM));
+    assert.notEqual(riskOrd(RiskLevel.MEDIUM), riskOrd(RiskLevel.HIGH));
+  });
+
+  // Read-only must not be WARN or BLOCK
+  it("Read tool is strictly ALLOW", () => {
+    const r = checker.check("Read", { file_path: "/etc/shadow" });
+    assert.equal(r.verdict, CheckVerdict.ALLOW);
+    assert.equal(r.risk_level, RiskLevel.LOW);
+  });
+});
+
+describe("command truncation", () => {
+  it("truncates at 500 chars in Bash check", () => {
+    const checker = new ScopeChecker(new ScopeBoundary());
+    const longCmd = "x".repeat(1000);
+    const r = checker.check("Bash", { command: longCmd });
+    assert.equal(r.target.length, 500);
+  });
+
+  it("truncates at 500 chars in extractTarget", () => {
+    const checker = new ScopeChecker(new ScopeBoundary());
+    const longUrl = "http://" + "x".repeat(1000);
+    const r = checker.check("SomeNewTool", { url: longUrl });
+    assert.equal(r.target.length, 500);
+  });
+
+  it("short commands are not truncated", () => {
+    const checker = new ScopeChecker(new ScopeBoundary());
+    const r = checker.check("Bash", { command: "echo hello" });
+    assert.equal(r.target, "echo hello");
   });
 });

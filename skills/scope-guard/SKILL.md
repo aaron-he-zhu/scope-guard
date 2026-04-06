@@ -343,3 +343,17 @@ in your agent:
 This adds a Node.js hook that intercepts every tool call with deterministic
 pattern matching, exit-code-based verdicts (0=allow, 1=warn, 2=block), and an
 append-only JSONL audit trail at `.claude/scope-guard-audit.jsonl`.
+
+---
+
+## Compatibility
+
+| Platform | Version | Status |
+|----------|---------|--------|
+| Claude Code | 1.0+ | Supported (SKILL.md + hooks) |
+| OpenClaw | 2026.3.24-beta.2+ | Supported (plugin) |
+| Node.js | 22+ | Required for hook runtime |
+
+## Issues & feedback
+
+Report bugs at [github.com/aaron-he-zhu/preflight-scope/issues](https://github.com/aaron-he-zhu/preflight-scope/issues).

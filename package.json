@@ -4,6 +4,13 @@
   "description": "Scope Guard — deterministic boundary enforcement with risk-based approval gates for AI agents",
   "type": "module",
   "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./checker": "./dist/checker.js",
+    "./risk": "./dist/risk.js",
+    "./scope": "./dist/scope.js",
+    "./audit": "./dist/audit.js"
+  },
   "bin": {
     "scope-guard": "./dist/hook.js"
   },
