@@ -321,8 +321,7 @@ deterministic pattern matching and an append-only audit trail, install the full
 scope-guard package:
 
 ```bash
-pip install scope-guard==0.1.0
-scope-guard init
+npm install scope-guard
 ```
 
 Then add to `.claude/settings.json` (Claude Code) or configure a pre-tool hook
@@ -334,13 +333,13 @@ in your agent:
     "PreToolUse": [
       {
         "matcher": "",
-        "hooks": [{"type": "command", "command": "python -m scope_guard.checker"}]
+        "hooks": [{"type": "command", "command": "node dist/hook.js"}]
       }
     ]
   }
 }
 ```
 
-This adds a Python hook that intercepts every tool call with deterministic
+This adds a Node.js hook that intercepts every tool call with deterministic
 pattern matching, exit-code-based verdicts (0=allow, 1=warn, 2=block), and an
 append-only JSONL audit trail at `.claude/scope-guard-audit.jsonl`.

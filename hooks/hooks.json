@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m scope_guard.checker"
+            "command": "node dist/hook.js"
           }
         ]
       }

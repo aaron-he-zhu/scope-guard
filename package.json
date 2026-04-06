@@ -1,13 +1,14 @@
 {
-  "name": "@scope-guard/openclaw-plugin",
+  "name": "scope-guard",
   "version": "0.1.0",
-  "description": "Scope Guard plugin for OpenClaw — deterministic boundary enforcement with risk-based approval gates",
+  "description": "Scope Guard — deterministic boundary enforcement with risk-based approval gates for AI agents",
   "type": "module",
   "main": "./dist/index.js",
+  "bin": {
+    "scope-guard": "./dist/hook.js"
+  },
   "openclaw": {
-    "extensions": [
-      "./dist/index.js"
-    ],
+    "extensions": ["./dist/index.js"],
     "compat": {
       "pluginApi": ">=2026.3.24-beta.2"
     }
@@ -15,16 +16,17 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
+    "test": "node --test dist/test.js",
     "clean": "rm -rf dist"
   },
   "keywords": [
-    "openclaw",
-    "preflight",
     "scope-guard",
     "safety",
     "guardrail",
     "risk",
-    "approval-gate"
+    "approval-gate",
+    "openclaw",
+    "claude-code"
   ],
   "author": "aaron-he-zhu",
   "license": "MIT",
