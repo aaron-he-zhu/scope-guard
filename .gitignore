@@ -10,3 +10,6 @@ build/
 .claude/preflight-rules.yaml
 *.egg
 .eggs/
+.coverage
+.venv/
+.mypy_cache/
