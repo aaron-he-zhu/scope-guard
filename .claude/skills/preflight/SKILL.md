@@ -315,7 +315,7 @@ deterministic pattern matching and an append-only audit trail, install the full
 Preflight package:
 
 ```bash
-pip install preflight-scope
+pip install preflight-scope==0.1.0
 preflight init
 ```
 
