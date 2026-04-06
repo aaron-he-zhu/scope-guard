@@ -64,8 +64,11 @@ class AuditLog:
         for line in self.path.read_text().strip().split("\n"):
             if not line:
                 continue
-            d = json.loads(line)
-            entries.append(AuditEntry(**d))
+            try:
+                d = json.loads(line)
+                entries.append(AuditEntry(**d))
+            except (json.JSONDecodeError, TypeError):
+                continue  # skip malformed lines
         return entries[-limit:]
 
     def summary(self) -> dict[str, Any]:

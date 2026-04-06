@@ -67,7 +67,9 @@ building the scope boundary.
   ],
   "risk_level": "medium",
   "approval_required": false,
-  "task_summary": "Brief description of the task"
+  "task_summary": "Brief description of the task",
+  "created_at": "2026-04-06T10:00:00+0000",
+  "revisions": []
 }
 ```
 
@@ -173,7 +175,9 @@ silently without producing any output.
   `files_in_scope` or falls under a directory in `dirs_in_scope`. When comparing
   paths, treat `./src/foo.py` and `src/foo.py` as equivalent — ignore leading
   `./` and trailing `/`.
-- **Bash**: Check if the command references files outside scope.
+- **Bash**: Evaluate the command against risk rules only (scope checking for
+  shell commands is best-effort — file references inside shell strings are not
+  reliably extractable).
 - **Read / Glob / Grep / WebSearch / WebFetch**: Always allowed — read-only
   operations do not need scope checks.
 
@@ -223,7 +227,7 @@ Print a one-line notice before proceeding:
 |---|---|
 | File overwrites | Using the Write tool (creates/overwrites entire files) |
 | Network reads | `curl`, `wget`, `fetch` (read-only network) |
-| Package installs | `pip install`, `npm install`, `yarn add`, `brew install` |
+| Package installs | `pip install`, `npm install`, `yarn add`, `apt install`, `brew install` |
 | Git discards | `git checkout -- .`, `git restore`, `git clean -f`, `git branch -D` |
 | Permission changes | `chmod`, `chown` |
 
@@ -231,7 +235,7 @@ Print a one-line notice before proceeding:
 
 | Category | Examples |
 |---|---|
-| Read-only tools | Read, Glob, Grep, WebSearch, WebFetch |
+| Read-only / non-destructive tools | Read, Glob, Grep, WebSearch, WebFetch, TodoWrite, AskUserQuestion |
 | In-scope edits | Editing a file listed in `files_in_scope` |
 | Safe commands | `ls`, `echo`, `cat`, `git status`, `git log`, `python script.py` |
 | Test execution | `pytest`, `npm test`, `cargo test` |

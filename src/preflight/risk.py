@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -24,11 +25,19 @@ class RiskRule:
     pattern: str  # regex to match against the serialised params
     risk: RiskLevel
     description: str = ""
+    _compiled: re.Pattern[str] | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        try:
+            self._compiled = re.compile(self.pattern, re.IGNORECASE)
+        except re.error as exc:
+            raise ValueError(f"Invalid regex in rule '{self.name}': {exc}") from exc
 
     def matches(self, tool_name: str, params_str: str) -> bool:
         if self.tool != "*" and self.tool.lower() != tool_name.lower():
             return False
-        return bool(re.search(self.pattern, params_str, re.IGNORECASE))
+        assert self._compiled is not None
+        return bool(self._compiled.search(params_str))
 
 
 class RiskEngine:
@@ -67,12 +76,7 @@ class RiskEngine:
 
     def assess(self, tool_name: str, params: dict[str, Any] | str) -> RiskLevel:
         """Return the highest risk level matched by any rule."""
-        if isinstance(params, dict):
-            import json
-            params_str = json.dumps(params, default=str)
-        else:
-            params_str = str(params)
-
+        params_str = _params_to_str(params)
         highest = RiskLevel.LOW
         for rule in self.rules:
             if rule.matches(tool_name, params_str):
@@ -82,12 +86,12 @@ class RiskEngine:
 
     def matching_rules(self, tool_name: str, params: dict[str, Any] | str) -> list[RiskRule]:
         """Return all rules that match the given tool call."""
-        if isinstance(params, dict):
-            import json
-            params_str = json.dumps(params, default=str)
-        else:
-            params_str = str(params)
+        params_str = _params_to_str(params)
         return [r for r in self.rules if r.matches(tool_name, params_str)]
+
+
+def _params_to_str(params: dict[str, Any] | str) -> str:
+    return json.dumps(params, default=str) if isinstance(params, dict) else str(params)
 
 
 def _risk_ord(r: RiskLevel) -> int:
@@ -108,7 +112,7 @@ def _builtin_rules() -> list[RiskRule]:
         RiskRule(
             name="force_push",
             tool="Bash",
-            pattern=r"git\s+push\s+.*--force",
+            pattern=r"git\s+push\s+.*(--force|-f)\b",
             risk=RiskLevel.HIGH,
             description="Force push to remote",
         ),
@@ -129,7 +133,7 @@ def _builtin_rules() -> list[RiskRule]:
         RiskRule(
             name="network_send",
             tool="Bash",
-            pattern=r"\b(curl\s+.*-X\s*(POST|PUT|DELETE|PATCH)|wget\s+.*--post|npm\s+publish|docker\s+push)\b",
+            pattern=r"\b(curl\s+.*-X\s*(POST|PUT|DELETE|PATCH)|npm\s+publish|docker\s+push)\b|wget\s+.*--post",
             risk=RiskLevel.HIGH,
             description="Network operations that send data",
         ),
@@ -161,5 +165,12 @@ def _builtin_rules() -> list[RiskRule]:
             pattern=r"git\s+(checkout\s+--\s|restore\s|clean\s+-f|branch\s+-D)",
             risk=RiskLevel.MEDIUM,
             description="Potentially destructive git operations",
+        ),
+        RiskRule(
+            name="chmod_chown",
+            tool="Bash",
+            pattern=r"\b(chmod|chown)\b",
+            risk=RiskLevel.MEDIUM,
+            description="Changing file permissions or ownership",
         ),
     ]

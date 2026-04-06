@@ -71,12 +71,12 @@ def _cmd_init(args: argparse.Namespace) -> None:
         shutil.copy2(rules_src, rules_dst)
         print(f"  Created {rules_dst}")
 
-    # 3. Copy SKILL.md
-    skill_dst = claude_dir / "commands" / "preflight.md"
-    skill_src = Path(__file__).parent.parent.parent / "skill" / "SKILL.md"
+    # 3. Copy SKILL.md to skills directory
+    skill_dst = claude_dir / "skills" / "preflight" / "SKILL.md"
+    skill_src = Path(__file__).parent / "data" / "SKILL.md"
     if not skill_src.exists():
-        # Try installed package location
-        skill_src = Path(__file__).parent / "data" / "SKILL.md"
+        # Fallback to repo root
+        skill_src = Path(__file__).parent.parent.parent / "skill" / "SKILL.md"
     if skill_src.exists():
         skill_dst.parent.mkdir(parents=True, exist_ok=True)
         if skill_dst.exists() and not args.force:
@@ -174,7 +174,11 @@ def _cmd_check(args: argparse.Namespace) -> None:
     engine = RiskEngine.default()
     checker = ScopeChecker(boundary, engine)
 
-    params = json.loads(args.params_json)
+    try:
+        params = json.loads(args.params_json)
+    except json.JSONDecodeError as exc:
+        print(f"Error: invalid JSON — {exc}", file=sys.stderr)
+        sys.exit(1)
     result = checker.check(args.tool, params)
 
     print(json.dumps(result.to_dict(), indent=2))

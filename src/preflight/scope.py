@@ -5,15 +5,10 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field, asdict
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
-
-class RiskLevel(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
+from preflight.risk import RiskLevel
 
 
 @dataclass
@@ -150,5 +145,13 @@ class ScopeBoundary:
 
 
 def _normalise(p: str) -> str:
-    """Normalise a file path for comparison."""
-    return str(Path(p).resolve()) if Path(p).is_absolute() else p.strip().rstrip("/")
+    """Normalise a file path for comparison.
+
+    Uses os.path.normpath to collapse '..' and '.' segments for all paths,
+    preventing path-traversal bypasses like 'src/auth/../../etc/passwd'.
+    """
+    import os
+    cleaned = p.strip().rstrip("/")
+    if Path(cleaned).is_absolute():
+        return str(Path(cleaned).resolve())
+    return os.path.normpath(cleaned)

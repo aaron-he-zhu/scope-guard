@@ -8,13 +8,13 @@ rules:
 
   - name: destructive_rm
     tool: Bash
-    pattern: '\brm\s+(-rf|-r\s|--recursive)'
+    pattern: '\b(rm\s+(-rf|-r\s|--recursive)|rmdir)\b'
     risk: high
     description: Recursive file deletion
 
   - name: force_push
     tool: Bash
-    pattern: 'git\s+push\s+.*--force'
+    pattern: 'git\s+push\s+.*(--force|-f)\b'
     risk: high
     description: Force push overwrites remote history
 
@@ -50,9 +50,9 @@ rules:
 
   - name: curl_mutate
     tool: Bash
-    pattern: 'curl\s+.*-X\s*(POST|PUT|DELETE|PATCH)'
+    pattern: '(curl\s+.*-X\s*(POST|PUT|DELETE|PATCH)|wget\s+.*--post)'
     risk: high
-    description: HTTP mutation via curl
+    description: HTTP mutation via curl or wget
 
   # ============ MEDIUM RISK ============
 
@@ -70,7 +70,7 @@ rules:
 
   - name: package_install
     tool: Bash
-    pattern: '\b(pip\s+install|npm\s+install|yarn\s+add|brew\s+install)\b'
+    pattern: '\b(pip\s+install|npm\s+install|yarn\s+add|apt\s+install|brew\s+install)\b'
     risk: medium
     description: Installing packages
 

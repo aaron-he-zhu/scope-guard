@@ -100,10 +100,10 @@ class ScopeChecker:
 
         if not file_path:
             return CheckResult(
-                verdict=CheckVerdict.ALLOW,
+                verdict=CheckVerdict.WARN,
                 tool=tool_name,
                 target="",
-                reason="no file path detected",
+                reason="no file path detected — cannot verify scope",
                 risk_level=risk,
             )
 
@@ -204,9 +204,9 @@ def hook_main() -> None:
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
-        # If we can't parse, allow by default.
-        print(json.dumps({"verdict": "allow", "reason": "unparsable input"}))
-        sys.exit(0)
+        # Safety tool must fail closed — block on unparseable input.
+        print(json.dumps({"verdict": "block", "reason": "unparsable input"}))
+        sys.exit(2)
 
     tool_name = payload.get("tool_name", payload.get("tool", ""))
     params = payload.get("tool_input", payload.get("params", {}))
@@ -223,8 +223,8 @@ def hook_main() -> None:
         from preflight.audit import AuditLog
         audit = AuditLog.default()
         audit.record(result)
-    except Exception:
-        pass  # Audit failure should not block the tool.
+    except Exception as exc:
+        print(f"[preflight] audit write failed: {exc}", file=sys.stderr)
 
     print(json.dumps(result.to_dict()))
 
