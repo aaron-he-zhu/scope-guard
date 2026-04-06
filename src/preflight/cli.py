@@ -72,7 +72,7 @@ def _cmd_init(args: argparse.Namespace) -> None:
         print(f"  Created {rules_dst}")
 
     # 3. Copy SKILL.md to skills directory
-    skill_dst = claude_dir / "skills" / "preflight" / "SKILL.md"
+    skill_dst = claude_dir / "skills" / "scope-guard" / "SKILL.md"
     skill_src = Path(__file__).parent / "data" / "SKILL.md"
     if not skill_src.exists():
         # Fallback to repo root

@@ -1,5 +1,5 @@
 ---
-name: preflight
+name: scope-guard
 description: "Scope guard and safety guardrail. Use when editing files, running destructive commands, pushing code, or when scope is ambiguous. Prevents scope drift with boundary enforcement, risk-based approval gates, and assumption surfacing."
 version: 1.0.0
 license: MIT
@@ -11,10 +11,10 @@ metadata:
     emoji: "🛡️"
     homepage: "https://github.com/aaron-he-zhu/preflight-scope"
     always: false
-    skillKey: preflight
+    skillKey: scope-guard
 ---
 
-# Preflight — Scope Guard and Safety Guardrail
+# Scope Guard — Safety Guardrail for AI Agents
 
 Prevent scope drift, surface hidden assumptions, and enforce risk-based approval
 gates — before executing any task that modifies state. Generates a scope
@@ -289,8 +289,8 @@ works across Claude Code, OpenClaw, and any compatible agent.
 
 ```bash
 # Option A: copy manually
-mkdir -p .claude/skills/preflight
-cp SKILL.md .claude/skills/preflight/
+mkdir -p .claude/skills/scope-guard
+cp SKILL.md .claude/skills/scope-guard/
 
 # Option B: via skills.sh
 npx skills add aaron-he-zhu/preflight-scope
@@ -300,15 +300,15 @@ npx skills add aaron-he-zhu/preflight-scope
 
 ```bash
 # From ClawHub registry
-openclaw skills install preflight
+openclaw skills install scope-guard
 
 # Or via clawhub CLI
-clawhub install preflight
+clawhub install scope-guard
 ```
 
 ### Any AgentSkills-compatible agent
 
-Copy the `preflight/` directory (containing this `SKILL.md`) into your agent's
+Copy the `scope-guard/` directory (containing this `SKILL.md`) into your agent's
 skills folder.
 
 ---
@@ -318,7 +318,7 @@ skills folder.
 This skill provides **prompt-level** scope control — it guides the model's
 behaviour but is not deterministic. For code-enforced guardrails with
 deterministic pattern matching and an append-only audit trail, install the full
-Preflight package:
+scope-guard package:
 
 ```bash
 pip install preflight-scope==0.1.0
@@ -343,4 +343,4 @@ in your agent:
 
 This adds a Python hook that intercepts every tool call with deterministic
 pattern matching, exit-code-based verdicts (0=allow, 1=warn, 2=block), and an
-append-only JSONL audit trail at `.claude/preflight-audit.jsonl`.
+append-only JSONL audit trail at `.claude/scope-guard-audit.jsonl`.

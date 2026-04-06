@@ -1,7 +1,7 @@
 {
-  "name": "preflight-scope",
+  "name": "scope-guard",
   "version": "0.1.0",
-  "description": "Scope guard with boundary enforcement, risk-based approval gates, and audit trail",
+  "description": "Scope Guard — boundary enforcement, risk-based approval gates, and audit trail",
   "author": {
     "name": "aaron-he-zhu",
     "url": "https://github.com/aaron-he-zhu"

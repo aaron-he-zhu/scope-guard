@@ -1,7 +1,7 @@
 {
-  "name": "@preflight-scope/openclaw-plugin",
+  "name": "@scope-guard/openclaw-plugin",
   "version": "0.1.0",
-  "description": "Preflight scope guard plugin for OpenClaw — deterministic boundary enforcement with risk-based approval gates",
+  "description": "Scope Guard plugin for OpenClaw — deterministic boundary enforcement with risk-based approval gates",
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {

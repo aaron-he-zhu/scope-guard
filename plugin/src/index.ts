@@ -5,7 +5,7 @@
  * and risk-based approval gates on every tool call.
  *
  * Dual-layer enforcement:
- *   1. SKILL.md (prompt-level) — bundled under ./skills/preflight/
+ *   1. SKILL.md (prompt-level) — bundled under ./skills/scope-guard/
  *   2. This hook (deterministic) — blocks/approves via exit semantics
  */
 
@@ -54,8 +54,8 @@ function definePluginEntry(entry: PluginEntry): PluginEntry {
 }
 
 export default definePluginEntry({
-  id: "preflight",
-  name: "Preflight Scope Guard",
+  id: "scope-guard",
+  name: "Scope Guard",
 
   register(api: PluginAPI) {
     api.registerHook(
@@ -72,7 +72,7 @@ export default definePluginEntry({
 
           const auditLogPath = config.auditLogPath
             ? join(workspacePath, config.auditLogPath)
-            : join(workspacePath, ".claude", "preflight-audit.jsonl");
+            : join(workspacePath, ".claude", "scope-guard-audit.jsonl");
 
           // Load scope boundary
           const boundary = ScopeBoundary.load(scopePath);
@@ -89,7 +89,7 @@ export default definePluginEntry({
             const audit = new AuditLog(auditLogPath);
             audit.record(result);
           } catch (e) {
-            console.error(`[preflight] audit write failed: ${e}`);
+            console.error(`[scope-guard] audit write failed: ${e}`);
           }
 
           // Map verdict to OpenClaw hook semantics
@@ -97,7 +97,7 @@ export default definePluginEntry({
             case CheckVerdict.BLOCK:
               return {
                 block: true,
-                blockReason: `[preflight] BLOCKED: ${result.reason} (target: ${result.target})`,
+                blockReason: `[scope-guard] BLOCKED: ${result.reason} (target: ${result.target})`,
               };
             case CheckVerdict.WARN:
               return {
@@ -109,15 +109,15 @@ export default definePluginEntry({
           }
         } catch (e) {
           // Safety tool must fail closed — block on internal errors
-          console.error(`[preflight] internal error: ${e}`);
+          console.error(`[scope-guard] internal error: ${e}`);
           return {
             block: true,
-            blockReason: "[preflight] internal error — fail closed",
+            blockReason: "[scope-guard] internal error — fail closed",
           };
         }
       },
       {
-        name: "preflight.scope-check",
+        name: "scope-guard.check",
         description:
           "Enforces scope boundaries and risk-based approval gates on every tool call",
       },
