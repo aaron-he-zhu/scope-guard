@@ -30,9 +30,9 @@ function main(): void {
     return; // unreachable, helps TS
   }
 
-  let payload: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    payload = JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch {
     // Unparsable input — fail closed
     console.log(JSON.stringify({ verdict: "block", reason: "unparsable input" }));
@@ -40,8 +40,26 @@ function main(): void {
     return; // unreachable, helps TS
   }
 
-  const toolName = (payload.tool_name ?? payload.tool ?? "") as string;
-  const params = (payload.tool_input ?? payload.params ?? {}) as Record<string, unknown>;
+  // Validate payload is a non-null object (#1 null payload)
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    console.log(JSON.stringify({ verdict: "block", reason: "payload must be a JSON object" }));
+    process.exit(2);
+    return;
+  }
+
+  const payload = parsed as Record<string, unknown>;
+  const toolName = String(payload.tool_name ?? payload.tool ?? "");
+  const params = (
+    payload.tool_input !== null &&
+    typeof payload.tool_input === "object" &&
+    !Array.isArray(payload.tool_input)
+      ? payload.tool_input
+      : payload.params !== null &&
+          typeof payload.params === "object" &&
+          !Array.isArray(payload.params)
+        ? payload.params
+        : {}
+  ) as Record<string, unknown>;
 
   const cwd = process.cwd();
   const scopePath = join(cwd, ".claude", "scope-boundary.json");

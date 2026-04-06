@@ -1,7 +1,7 @@
 ---
 name: scope-guard
 description: "Scope guard and safety guardrail. Use when editing files, running destructive commands, pushing code, or when scope is ambiguous. Prevents scope drift with boundary enforcement, risk-based approval gates, and assumption surfacing."
-version: 1.0.0
+version: 0.1.0
 license: MIT
 compatibility: "Works with Claude Code, OpenClaw, and any AgentSkills-compatible agent. No external binaries or API keys required."
 metadata:

@@ -1,6 +1,5 @@
 /**
  * Lightweight audit log for scope-guard decisions.
- * TypeScript port of src/preflight/audit.py
  */
 
 import { appendFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
@@ -21,7 +20,7 @@ export class AuditLog {
   constructor(readonly path: string) {}
 
   static default(): AuditLog {
-    return new AuditLog(`${process.cwd()}/.claude/preflight-audit.jsonl`);
+    return new AuditLog(`${process.cwd()}/.claude/scope-guard-audit.jsonl`);
   }
 
   record(result: CheckResult): void {
@@ -53,7 +52,7 @@ export class AuditLog {
   }
 
   summary(): { total: number; verdicts?: Record<string, number>; scope_violations?: number } {
-    const entries = this.read(9999);
+    const entries = this.read(50_000);
     if (entries.length === 0) return { total: 0 };
     const verdicts: Record<string, number> = { allow: 0, warn: 0, block: 0 };
     let scopeViolations = 0;

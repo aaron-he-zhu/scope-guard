@@ -1,5 +1,5 @@
 /**
- * Preflight Scope Guard — OpenClaw Plugin Entry Point
+ * Scope Guard — OpenClaw Plugin Entry Point
  *
  * Registers a `before_tool_call` hook that enforces scope boundaries
  * and risk-based approval gates on every tool call.

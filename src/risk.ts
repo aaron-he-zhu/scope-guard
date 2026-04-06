@@ -1,6 +1,5 @@
 /**
  * Rule-based risk assessment engine.
- * TypeScript port of src/preflight/risk.py
  */
 
 export enum RiskLevel {
@@ -146,7 +145,7 @@ export function builtinRules(): RiskRule[] {
     new RiskRule({
       name: "curl_mutate",
       tool: "Bash",
-      pattern: "(curl\\s+.*-X\\s*(POST|PUT|DELETE|PATCH)|wget\\s+.*--post)",
+      pattern: "(curl\\s+.*?-X\\s*(POST|PUT|DELETE|PATCH)|wget\\s+.*?--post)",
       risk: RiskLevel.HIGH,
       description: "HTTP mutation via curl or wget",
     }),

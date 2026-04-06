@@ -1,6 +1,5 @@
 /**
  * Scope boundary: the core data structure that defines what an agent is allowed to do.
- * TypeScript port of src/preflight/scope.py
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -46,7 +45,11 @@ export class ScopeBoundary {
     this.files_in_scope = data?.files_in_scope ?? [];
     this.dirs_in_scope = data?.dirs_in_scope ?? [];
     this.assumptions = data?.assumptions ?? [];
-    this.risk_level = (data?.risk_level as RiskLevel) ?? RiskLevel.LOW;
+    const rl = data?.risk_level;
+    this.risk_level =
+      rl === RiskLevel.LOW || rl === RiskLevel.MEDIUM || rl === RiskLevel.HIGH
+        ? rl
+        : RiskLevel.LOW;
     this.approval_required = data?.approval_required ?? false;
     this.task_summary = data?.task_summary ?? "";
     this.created_at = data?.created_at ?? new Date().toISOString();
@@ -138,10 +141,15 @@ export class ScopeBoundary {
 
 /**
  * Normalise a file path for comparison.
- * Uses normalize() to collapse '..' and '.' segments, preventing traversal bypasses.
+ * Always produces a relative path so that scope boundaries declared with
+ * relative paths cannot be bypassed using absolute paths (#2).
  */
 export function normalisePath(p: string): string {
   const cleaned = p.trim().replace(/\/+$/, "");
-  if (isAbsolute(cleaned)) return resolve(cleaned);
-  return normalize(cleaned);
+  // Strip leading slash to force relative comparison
+  const relative = cleaned.replace(/^\/+/, "");
+  const normalised = normalize(relative);
+  // Block path traversal — if result escapes root it's suspicious
+  if (normalised.startsWith("..")) return "__blocked__";
+  return normalised;
 }

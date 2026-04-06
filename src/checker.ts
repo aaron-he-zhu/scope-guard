@@ -1,6 +1,5 @@
 /**
  * ScopeChecker — the core engine that decides allow / warn / block for every tool call.
- * TypeScript port of src/preflight/checker.py
  */
 
 import { RiskEngine, RiskLevel, riskOrd } from "./risk.js";
@@ -115,7 +114,7 @@ export class ScopeChecker {
   }
 
   private checkBash(toolName: string, params: Record<string, unknown>): CheckResult {
-    const command = ((params.command as string) ?? "").slice(0, 120);
+    const command = ((params.command as string) ?? "").slice(0, 500);
     const risk = this.riskEngine.assess(toolName, params);
 
     if (risk === RiskLevel.HIGH) {
@@ -174,7 +173,8 @@ function verdictForRisk(risk: RiskLevel): CheckVerdict {
 
 function extractTarget(toolName: string, params: Record<string, unknown>): string {
   for (const key of ["file_path", "notebook_path", "command", "pattern", "url", "query"]) {
-    if (key in params) return String(params[key]).slice(0, 120);
+    const val = params[key];
+    if (val != null && val !== "") return String(val).slice(0, 500);
   }
   return "";
 }
