@@ -1,12 +1,6 @@
 ---
 name: preflight
-description: >-
-  Scope guard for agentic tasks. Generates a scope boundary before executing
-  file modifications, multi-step work, external actions, or ambiguous requests.
-  Prevents scope drift, surfaces hidden assumptions, and enforces risk-based
-  approval gates. Use when editing files, running destructive commands, pushing
-  code, deleting resources, or when the request is ambiguous about which files
-  or modules are involved.
+description: "Scope guard — use when editing files, running destructive commands, pushing code, deleting resources, or when scope is ambiguous. Generates a scope boundary to prevent drift, surface assumptions, and enforce risk-based approval gates for agentic tasks."
 ---
 
 # Preflight Scope Guard
@@ -33,7 +27,8 @@ gates — before executing any task that modifies state.
 ## Step 1: Generate scope boundary
 
 Analyze the user's request and write `.claude/scope-boundary.json` before
-starting any work.
+starting any work. You may use read-only tools (Read, Glob, Grep) freely while
+building the scope boundary.
 
 ### Schema
 
@@ -45,7 +40,7 @@ starting any work.
     {"text": "Session tokens are stored in Redis", "verified": false},
     {"text": "Tests use pytest fixtures", "verified": true, "verification_method": "read pyproject.toml"}
   ],
-  "risk_level": "low | medium | high",
+  "risk_level": "medium",
   "approval_required": false,
   "task_summary": "Brief description of the task"
 }
@@ -53,14 +48,18 @@ starting any work.
 
 ### Scope rules
 
-1. **files_in_scope**: Files the user mentioned + their direct imports/dependents.
-   Cap at 15 files; if more are needed, use `dirs_in_scope` instead.
+1. **files_in_scope**: Files the user explicitly mentioned, plus files that
+   directly import or are imported by those files — but only include files you
+   will actually need to read or modify. Cap at 15 files; if more are needed,
+   use `dirs_in_scope` instead.
 
 2. **dirs_in_scope**: Use for broader refactoring. Every file under these
    directories is considered in-scope.
 
 3. **assumptions**: List every non-obvious assumption. If you can quickly verify
-   one (grep, read a config), do so and mark `"verified": true`.
+   one (grep, read a config), do so and mark `"verified": true`. If you cannot
+   verify an assumption within 10 seconds, it MUST be marked `"verified": false`.
+   Never guess.
 
 4. **risk_level**:
    - `low` — read-only analysis, single-file edits to non-critical code
@@ -85,6 +84,22 @@ starting any work.
 }
 ```
 
+### Example: medium-risk refactoring
+
+```json
+{
+  "files_in_scope": [],
+  "dirs_in_scope": ["src/api/", "tests/api/"],
+  "assumptions": [
+    {"text": "All endpoints return JSON", "verified": true, "verification_method": "grep Content-Type src/api/"},
+    {"text": "Tests use pytest fixtures", "verified": true, "verification_method": "read conftest.py"}
+  ],
+  "risk_level": "medium",
+  "approval_required": false,
+  "task_summary": "Refactor API module from sync to async handlers"
+}
+```
+
 ### Example: high-risk deployment
 
 ```json
@@ -101,6 +116,14 @@ starting any work.
 }
 ```
 
+### Validate after writing
+
+After writing `scope-boundary.json`, verify:
+
+1. All listed files actually exist (quick Glob/Read check).
+2. No assumption is marked `"verified": true` without evidence.
+3. `risk_level` matches the highest-risk operation the task requires.
+
 ---
 
 ## Step 2: Display based on risk level
@@ -116,12 +139,15 @@ starting any work.
 ## Step 3: Self-check before every modification
 
 Before executing any Edit, Write, Bash, or other state-changing tool call,
-apply this checklist:
+apply this checklist. For in-scope, low-risk operations, perform this check
+silently without producing any output.
 
 ### 3a. Is the target in scope?
 
 - **Edit / Write / NotebookEdit**: Check that the `file_path` matches a file in
-  `files_in_scope` or falls under a directory in `dirs_in_scope`.
+  `files_in_scope` or falls under a directory in `dirs_in_scope`. When comparing
+  paths, treat `./src/foo.py` and `src/foo.py` as equivalent — ignore leading
+  `./` and trailing `/`.
 - **Bash**: Check if the command references files outside scope.
 - **Read / Glob / Grep / WebSearch / WebFetch**: Always allowed — read-only
   operations do not need scope checks.
@@ -146,6 +172,9 @@ If the target is **out of scope**:
 
 ### 3b. What is the risk level of this operation?
 
+When a command matches multiple risk categories, apply the **highest** risk
+level.
+
 #### HIGH risk — BLOCK (pause and get explicit user confirmation)
 
 These operations require the user to explicitly say "yes" before proceeding:
@@ -156,7 +185,7 @@ These operations require the user to explicitly say "yes" before proceeding:
 | Force push | `git push --force`, `git push -f` |
 | Hard reset | `git reset --hard` |
 | Database destruction | `DROP TABLE`, `DROP DATABASE`, `TRUNCATE TABLE` |
-| Secret/credential files | Any file ending in `.env`, `.pem`, `.key`, `.secret`, `.credentials` |
+| Secret/credential files | Reading or writing any file ending in `.env`, `.pem`, `.key`, `.secret`, `.credentials` — warn that contents will enter conversation context |
 | Publishing | `npm publish`, `docker push` |
 | Network mutations | `curl -X POST/PUT/DELETE/PATCH`, `wget --post` |
 | Production deployments | Deploy scripts, CI/CD pipeline modifications |
@@ -225,8 +254,10 @@ Scope **never** expands silently. The user must be aware of every expansion.
 
 ## Upgrade to hard enforcement
 
-This skill provides prompt-level scope control. For deterministic, code-enforced
-guardrails with audit logging, install the full Preflight package:
+This skill provides **prompt-level** scope control — it guides the model's
+behaviour but is not deterministic. For code-enforced guardrails with
+deterministic pattern matching and an append-only audit trail, install the full
+Preflight package:
 
 ```bash
 pip install preflight-scope
