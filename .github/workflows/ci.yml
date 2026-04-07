@@ -20,3 +20,18 @@ jobs:
       - run: npm install
       - run: npm run build
       - run: npm test
+
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run build
+      - name: Pack tarball
+        run: |
+          PACKAGE_TARBALL=$(npm pack --json | node -e 'const fs = require("node:fs"); const [result] = JSON.parse(fs.readFileSync(0, "utf8")); process.stdout.write(result.filename);')
+          echo "PACKAGE_TARBALL=$PACKAGE_TARBALL" >> "$GITHUB_ENV"
+      - run: npm run test:package-smoke -- "$PACKAGE_TARBALL"
