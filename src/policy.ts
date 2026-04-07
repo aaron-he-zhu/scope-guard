@@ -47,6 +47,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isRiskLevel(value: unknown): value is RiskLevel {
+  return value === RiskLevel.LOW || value === RiskLevel.MEDIUM || value === RiskLevel.HIGH;
+}
+
 /** Built-in compliance presets. */
 const PRESETS: Record<ComplianceMode, Partial<PolicyConfig>> = {
   hipaa: {
@@ -179,6 +187,9 @@ export function loadPolicy(policyPath: string, depth = 0): PolicyConfig {
     throw new Error(`policy extends chain exceeds max depth of ${MAX_EXTENDS_DEPTH}`);
   }
   if (!existsSync(policyPath)) {
+    if (depth > 0) {
+      throw new Error(`extended policy file not found: ${policyPath}`);
+    }
     return {};
   }
   let rawValue: unknown;
@@ -191,6 +202,9 @@ export function loadPolicy(policyPath: string, depth = 0): PolicyConfig {
     throw new Error(`policy file must contain a JSON object: ${policyPath}`);
   }
   const raw = rawValue as PolicyConfig;
+  if (raw.extends !== undefined && typeof raw.extends !== "string") {
+    throw new Error(`policy "extends" must be a string: ${policyPath}`);
+  }
 
   // Resolve extends
   let resolved: PolicyConfig = raw;
@@ -300,8 +314,18 @@ export function validatePolicy(config: PolicyConfig): ValidateResult {
     errors.push(`unknown compliance_mode: "${config.compliance_mode}"`);
   }
 
-  if (config.extra_rules) {
-    for (const r of config.extra_rules) {
+  if (config.extends !== undefined && typeof config.extends !== "string") {
+    errors.push("extends must be a string");
+  }
+
+  if (config.extra_rules !== undefined && !Array.isArray(config.extra_rules)) {
+    errors.push("extra_rules must be an array");
+  } else if (config.extra_rules) {
+    for (const [index, r] of config.extra_rules.entries()) {
+      if (!isPlainObject(r)) {
+        errors.push(`extra_rules[${index}] must be an object`);
+        continue;
+      }
       if (!r.name) errors.push("extra_rules entry missing name");
       if (!r.tool) errors.push(`extra_rules "${r.name}" missing tool`);
       if (!r.pattern) errors.push(`extra_rules "${r.name}" missing pattern`);
@@ -310,22 +334,37 @@ export function validatePolicy(config: PolicyConfig): ValidateResult {
       } catch {
         errors.push(`extra_rules "${r.name}" has invalid regex: ${r.pattern}`);
       }
-      if (!["low", "medium", "high"].includes(r.risk)) {
+      if (!isRiskLevel(r.risk)) {
         errors.push(`extra_rules "${r.name}" has invalid risk: ${r.risk}`);
       }
     }
   }
 
-  if (config.tool_overrides) {
+  if (config.tool_overrides !== undefined && !isPlainObject(config.tool_overrides)) {
+    errors.push("tool_overrides must be an object");
+  } else if (config.tool_overrides) {
     for (const [tool, risk] of Object.entries(config.tool_overrides)) {
-      if (!["low", "medium", "high"].includes(risk)) {
+      if (!isRiskLevel(risk)) {
         errors.push(`tool_overrides "${tool}" has invalid risk: ${risk}`);
       }
     }
   }
 
-  if (config.blocked_tools?.length && config.blocked_tools.some(t => !t)) {
+  if (config.blocked_tools !== undefined && !isStringArray(config.blocked_tools)) {
+    errors.push("blocked_tools must be an array of strings");
+  } else if (config.blocked_tools?.length && config.blocked_tools.some(t => !t)) {
     warnings.push("blocked_tools contains empty strings");
+  }
+
+  if (config.max_risk_auto_allow !== undefined && !isRiskLevel(config.max_risk_auto_allow)) {
+    errors.push(`max_risk_auto_allow has invalid risk: ${config.max_risk_auto_allow}`);
+  }
+
+  if (
+    config.require_scope_boundary !== undefined &&
+    typeof config.require_scope_boundary !== "boolean"
+  ) {
+    errors.push("require_scope_boundary must be a boolean");
   }
 
   return { valid: errors.length === 0, errors, warnings };

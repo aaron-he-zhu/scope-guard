@@ -121,7 +121,7 @@ export class AuditLog {
 
   /** Verify HMAC integrity and hash chain of all audit entries. */
   verify(): VerifyResult {
-    const parsedLines = this.parseLines(50_000);
+    const parsedLines = this.parseLines();
     const entries = parsedLines.flatMap((line) => (line.entry ? [line.entry] : []));
     const keyPath = this.path + ".key";
     const envKey = process.env.SCOPE_GUARD_HMAC_KEY;
@@ -251,7 +251,7 @@ export class AuditLog {
     }
   }
 
-  private parseLines(limit: number): ParsedAuditLine[] {
+  private parseLines(limit?: number): ParsedAuditLine[] {
     if (!existsSync(this.path)) return [];
     const raw = readFileSync(this.path, "utf-8").trim();
     if (!raw) return [];
@@ -264,6 +264,6 @@ export class AuditLog {
         return { malformed: true };
       }
     });
-    return parsed.slice(-limit);
+    return limit === undefined ? parsed : parsed.slice(-limit);
   }
 }

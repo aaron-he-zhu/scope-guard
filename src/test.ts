@@ -7,7 +7,7 @@ import { strict as assert } from "node:assert";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 import { RiskLevel, RiskRule, RiskEngine, builtinRules, riskOrd } from "./risk.js";
 import { ScopeBoundary, normalisePath } from "./scope.js";
@@ -237,6 +237,15 @@ describe("ScopeChecker", () => {
 
   it("Read sensitive out-of-scope file is WARN", () => {
     assert.equal(checker.check("Read", { file_path: "/etc/passwd" }).verdict, CheckVerdict.WARN);
+  });
+
+  it("Read ignores API resource allowlists for local files", () => {
+    const scoped = new ScopeChecker(new ScopeBoundary({
+      files_in_scope: ["src/auth/login.ts"],
+      resources: { allowed_resources: ["hubspot:contacts:*"] },
+    }));
+    const r = scoped.check("Read", { file_path: "src/auth/login.ts" });
+    assert.equal(r.verdict, CheckVerdict.ALLOW);
   });
 
   it("Glob is always ALLOW", () => {
@@ -506,6 +515,26 @@ describe("AuditLog", () => {
     const result = log.verify();
     assert.ok(result.tampered >= 1);
     assert.ok(result.chain_breaks >= 1);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("verify scans entries older than the last 50000 lines", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const validEntry = JSON.stringify({
+      timestamp: "2026-04-07T00:00:00.000Z",
+      tool: "Read",
+      target: "src/app.ts",
+      verdict: "allow",
+      risk_level: "low",
+      scope_violation: false,
+      reason: "ok",
+    });
+    const lines = ["NOT_JSON", ...Array.from({ length: 50001 }, () => validEntry)];
+    writeFileSync(p, lines.join("\n") + "\n");
+    const log = new AuditLog(p);
+    const result = log.verify();
+    assert.equal(result.tampered, 1);
     rmSync(tmp, { recursive: true });
   });
 
@@ -1206,6 +1235,33 @@ describe("MCP tool classification", () => {
     assert.equal(r.verdict, CheckVerdict.BLOCK);
     assert.equal(r.scope_violation, true);
   });
+
+  it("MCP mixed allowed and implicitly blocked resources is BLOCK", () => {
+    const boundary = new ScopeBoundary({
+      resources: {
+        allowed_resources: ["hubspot:contacts:*"],
+      },
+    });
+    const mixedChecker = new ScopeChecker(boundary);
+    const r = mixedChecker.check("mcp__hubspot__update_record", {
+      contact_id: "123",
+      deal_id: "456",
+    });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+    assert.equal(r.scope_violation, true);
+  });
+
+  it("MCP URL allowlists apply to uri fields", () => {
+    const boundary = new ScopeBoundary({
+      resources: { allowed_urls: ["https://docs.example.com/*"] },
+    });
+    const scoped = new ScopeChecker(boundary);
+    const r = scoped.check("mcp__scraper__get_page", {
+      uri: "https://evil.example.com/x",
+    });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+    assert.equal(r.scope_violation, true);
+  });
 });
 
 describe("MCP org boundary", () => {
@@ -1302,11 +1358,11 @@ describe("Escalation keywords", () => {
   });
 });
 
-describe("Protected resources on Read", () => {
-  it("Read of protected resource is BLOCK", () => {
-    const b = new ScopeBoundary({ resources: { protected_resources: ["*privileged*"] } });
+describe("Protected resources on MCP reads", () => {
+  it("MCP read of protected resource is BLOCK", () => {
+    const b = new ScopeBoundary({ resources: { protected_resources: ["hubspot:contacts:*"] } });
     const checker = new ScopeChecker(b);
-    const r = checker.check("Read", { file_path: "docs/privileged-memo.pdf" });
+    const r = checker.check("mcp__hubspot__get_contact", { contact_id: "123" });
     assert.equal(r.verdict, CheckVerdict.BLOCK);
     assert.equal(r.scope_violation, true);
   });
@@ -1446,6 +1502,14 @@ describe("PolicyConfig", () => {
     rmSync(tmp, { recursive: true });
   });
 
+  it("missing extends target throws", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-policy-"));
+    const childPath = join(tmp, "child.json");
+    writeFileSync(childPath, JSON.stringify({ extends: "missing-base.json" }));
+    assert.throws(() => loadPolicy(childPath), /extended policy file not found/);
+    rmSync(tmp, { recursive: true });
+  });
+
   it("buildRiskEngine includes extra rules", () => {
     const engine = buildRiskEngine({
       extra_rules: [
@@ -1520,6 +1584,14 @@ describe("validatePolicy", () => {
     });
     assert.equal(result.valid, false);
   });
+
+  it("invalid blocked_tools type is error", () => {
+    const result = validatePolicy({
+      blocked_tools: { Bash: true } as any,
+    });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes("blocked_tools")));
+  });
 });
 
 describe("policy enforcement", () => {
@@ -1567,11 +1639,92 @@ describe("package metadata", () => {
   it("points package metadata at the scope-guard repository", () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf-8"));
     const plugin = JSON.parse(readFileSync(join(import.meta.dirname, "..", ".claude-plugin", "plugin.json"), "utf-8"));
+    const openclaw = JSON.parse(readFileSync(join(import.meta.dirname, "..", "openclaw.plugin.json"), "utf-8"));
+    const hooks = JSON.parse(readFileSync(join(import.meta.dirname, "..", "hooks", "hooks.json"), "utf-8"));
+    const readme = readFileSync(join(import.meta.dirname, "..", "README.md"), "utf-8");
+    const skill = readFileSync(join(import.meta.dirname, "..", "skills", "scope-guard", "SKILL.md"), "utf-8");
     assert.equal(pkg.repository.url, "https://github.com/aaron-he-zhu/scope-guard.git");
     assert.equal(pkg.homepage, "https://github.com/aaron-he-zhu/scope-guard");
     assert.equal(pkg.bugs.url, "https://github.com/aaron-he-zhu/scope-guard/issues");
     assert.equal(plugin.repository, "https://github.com/aaron-he-zhu/scope-guard");
     assert.equal(plugin.homepage, "https://github.com/aaron-he-zhu/scope-guard");
+    assert.equal(plugin.skills, "./skills");
+    assert.equal(plugin.hooks, "./hooks/hooks.json");
+    assert.ok(pkg.files.includes("hooks"));
+    assert.ok(hooks.hooks.PreToolUse?.length >= 1);
+    assert.ok(hooks.hooks.PostToolUse?.length >= 1);
+    assert.ok(openclaw.configSchema.properties.policyPath);
+    assert.ok(readme.includes("# Merge hooks into .claude/settings.json safely"));
+    assert.ok(readme.includes("node <<'EOF'"));
+    assert.ok(!readme.includes("cat <<'EOF' >> .claude/settings.json"));
+    assert.match(
+      skill,
+      /metadata:\n  author: scope-guard\n  tags: "scope-guard,safety,risk,approval-gate,drift-prevention,guardrail,permission,boundary"\n  openclaw:\n    emoji: "🛡️"\n    homepage: "https:\/\/github\.com\/aaron-he-zhu\/scope-guard"\n    always: false\n    skillKey: scope-guard/,
+    );
+  });
+});
+
+describe("cli.ts", () => {
+  it("dry-run enforces blocked_tools from policy", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-cli-"));
+    const claudeDir = join(tmp, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(
+      join(claudeDir, "scope-boundary.json"),
+      JSON.stringify({ files_in_scope: ["src/app.ts"] }, null, 2),
+    );
+    writeFileSync(
+      join(claudeDir, "scope-guard-policy.json"),
+      JSON.stringify({ blocked_tools: ["Bash"] }, null, 2),
+    );
+
+    const result = spawnSync(
+      "node",
+      [join(import.meta.dirname, "..", "dist", "cli.js"), "--dry-run", "Bash", "{\"command\":\"echo ok\"}"],
+      { cwd: tmp, encoding: "utf-8" },
+    );
+
+    assert.equal(result.status, 3);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.verdict, CheckVerdict.BLOCK);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("validate rejects invalid scope boundaries", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-cli-"));
+    const claudeDir = join(tmp, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, "scope-boundary.json"), "[]\n");
+
+    const result = spawnSync(
+      "node",
+      [join(import.meta.dirname, "..", "dist", "cli.js"), "--validate"],
+      { cwd: tmp, encoding: "utf-8" },
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /scope-boundary\.json/);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("validate rejects missing extended policy files", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-cli-"));
+    const claudeDir = join(tmp, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(
+      join(claudeDir, "scope-guard-policy.json"),
+      JSON.stringify({ extends: "missing-base.json" }, null, 2),
+    );
+
+    const result = spawnSync(
+      "node",
+      [join(import.meta.dirname, "..", "dist", "cli.js"), "--validate"],
+      { cwd: tmp, encoding: "utf-8" },
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /extended policy file not found/);
+    rmSync(tmp, { recursive: true });
   });
 });
 

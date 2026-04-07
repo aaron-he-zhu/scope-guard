@@ -382,8 +382,9 @@ export class ScopeBoundary {
       if (status === "implicit_blocked") sawImplicitBlocked = true;
     }
 
+    if (sawImplicitBlocked) return "blocked";
     if (sawAllowed) return "allowed";
-    return sawImplicitBlocked ? "blocked" : "unknown";
+    return "unknown";
   }
 
   matchEscalationKeywords(text: string): string[] {

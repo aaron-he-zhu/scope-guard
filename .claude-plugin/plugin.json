@@ -10,6 +10,6 @@
   "repository": "https://github.com/aaron-he-zhu/scope-guard",
   "license": "MIT",
   "keywords": ["scope-guard", "safety", "guardrail", "risk", "approval-gate", "drift-prevention"],
-  "skills": "./.claude/skills/",
+  "skills": "./skills",
   "hooks": "./hooks/hooks.json"
 }
