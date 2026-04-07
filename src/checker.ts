@@ -252,7 +252,7 @@ export class ScopeChecker {
     const target = extractTarget(toolName, params);
     const risk = this.assessRisk(toolName, params);
     const filePath = readFilePathFromParams(params);
-    const url = typeof params.url === "string" && params.url !== "" ? params.url : undefined;
+    const url = extractUrlFromParams(params);
 
     if (filePath && !this.boundary.isEmpty && !this.boundary.isFileInScope(filePath)) {
       return {
@@ -287,21 +287,6 @@ export class ScopeChecker {
           scope_violation: true,
         };
       }
-    }
-
-    const resourceAccess = this.boundary.getResourceAccess(target ? [target] : []);
-    if (resourceAccess === "protected" || resourceAccess === "blocked") {
-      return {
-        verdict: CheckVerdict.BLOCK,
-        tool: toolName,
-        target,
-        reason:
-          resourceAccess === "protected"
-            ? "protected resource — read access denied"
-            : "blocked resource — read access denied",
-        risk_level: RiskLevel.HIGH,
-        scope_violation: true,
-      };
     }
 
     // escalation keywords check
@@ -353,7 +338,7 @@ export class ScopeChecker {
     const matchedRules = this.riskEngine.matchingRules(toolName, params).map(r => r.name);
     const params_summary = buildParamsSummary(parsed, params);
     const resourceCandidates = extractResourceCandidates(parsed, params);
-    const url = typeof params.url === "string" && params.url !== "" ? params.url : undefined;
+    const url = extractUrlFromParams(params);
 
     // 1. OrgBoundary: server allow/block list
     if (parsed && !this.boundary.isMcpServerAllowed(parsed.server)) {
@@ -641,6 +626,10 @@ function extractTarget(toolName: string, params: Record<string, unknown>): strin
     "command",
     "pattern",
     "url",
+    "uri",
+    "endpoint",
+    "link",
+    "href",
     "query",
     "sql",
     "resource",
@@ -656,6 +645,14 @@ function extractTarget(toolName: string, params: Record<string, unknown>): strin
 
 function readFilePathFromParams(params: Record<string, unknown>): string {
   return String(params.file_path ?? params.notebook_path ?? params.path ?? "");
+}
+
+function extractUrlFromParams(params: Record<string, unknown>): string | undefined {
+  for (const key of ["url", "uri", "endpoint", "link", "href"]) {
+    const value = params[key];
+    if (typeof value === "string" && value !== "") return value;
+  }
+  return undefined;
 }
 
 function getToolOverride(policy: PolicyConfig, toolName: string): RiskLevel | undefined {

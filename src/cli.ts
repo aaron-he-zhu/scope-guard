@@ -10,8 +10,8 @@
  */
 
 import { join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
-import { ScopeChecker, CheckVerdict } from "./checker.js";
+import { existsSync } from "node:fs";
+import { ScopeChecker } from "./checker.js";
 import { RiskEngine } from "./risk.js";
 import { ScopeBoundary } from "./scope.js";
 import { AuditLog } from "./audit.js";
@@ -36,10 +36,11 @@ function dryRun(tool: string, paramsStr?: string): void {
   const policyPath = join(cwd, ".claude", "scope-guard-policy.json");
 
   const boundary = ScopeBoundary.load(scopePath);
+  let policy = {};
 
   let engine: RiskEngine;
   if (existsSync(policyPath)) {
-    const policy = loadPolicy(policyPath);
+    policy = loadPolicy(policyPath);
     engine = buildRiskEngine(policy);
   } else {
     engine = RiskEngine.default();
@@ -55,7 +56,7 @@ function dryRun(tool: string, paramsStr?: string): void {
     }
   }
 
-  const checker = new ScopeChecker(boundary, engine);
+  const checker = new ScopeChecker(boundary, engine, undefined, policy);
   const result = checker.check(tool, params);
 
   console.log(JSON.stringify(result, null, 2));
@@ -74,21 +75,21 @@ function validate(policyPath?: string): void {
 
   // Validate scope boundary
   if (existsSync(scopePath)) {
-    try {
-      const raw = JSON.parse(readFileSync(scopePath, "utf-8"));
-      console.log("✓ scope-boundary.json: valid JSON");
-      if (raw.files_in_scope?.length || raw.dirs_in_scope?.length) {
-        console.log(`  files: ${raw.files_in_scope?.length ?? 0}, dirs: ${raw.dirs_in_scope?.length ?? 0}`);
-      }
-      if (raw.org_boundary) {
-        console.log(`  org_boundary: tenant=${raw.org_boundary.tenant_id ?? "none"}`);
-      }
-      if (raw.resources) {
-        console.log(`  resources: ${Object.keys(raw.resources).join(", ")}`);
-      }
-    } catch (e) {
-      console.error(`✗ scope-boundary.json: ${e}`);
+    const boundary = ScopeBoundary.load(scopePath);
+    if (boundary.load_state === "invalid") {
+      console.error(`✗ scope-boundary.json: ${boundary.load_error ?? "invalid scope boundary"}`);
       hasErrors = true;
+    } else {
+      console.log("✓ scope-boundary.json: valid");
+      if (boundary.files_in_scope.length || boundary.dirs_in_scope.length) {
+        console.log(`  files: ${boundary.files_in_scope.length}, dirs: ${boundary.dirs_in_scope.length}`);
+      }
+      if (boundary.org_boundary) {
+        console.log(`  org_boundary: tenant=${boundary.org_boundary.tenant_id ?? "none"}`);
+      }
+      if (boundary.resources) {
+        console.log(`  resources: ${Object.keys(boundary.resources).join(", ")}`);
+      }
     }
   } else {
     console.log("○ scope-boundary.json: not found (optional)");

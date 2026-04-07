@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/aaron-he-zhu/preflight-scope/scope-boundary.schema.json",
+  "$id": "https://github.com/aaron-he-zhu/scope-guard/scope-boundary.schema.json",
   "title": "Scope Boundary",
   "description": "Defines the files, directories, assumptions, and risk level for an AI agent task.",
   "type": "object",

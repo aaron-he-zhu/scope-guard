@@ -23,6 +23,7 @@
   },
   "files": [
     "dist",
+    "hooks",
     "skills",
     ".claude-plugin",
     "openclaw.plugin.json",

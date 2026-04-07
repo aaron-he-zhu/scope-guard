@@ -6,7 +6,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node dist/hook.js"
+            "command": "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook.js\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook-post.js\""
           }
         ]
       }

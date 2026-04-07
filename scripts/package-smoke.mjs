@@ -60,6 +60,7 @@ for (const expected of [
   "package/package.json",
   "package/README.md",
   "package/.claude-plugin/plugin.json",
+  "package/hooks/hooks.json",
   "package/dist/hook.js",
   "package/dist/hook-post.js",
   "package/dist/init.js",
@@ -87,6 +88,7 @@ try {
   const consumerRoot = join(tmpRoot, "consumer");
   const claudeDir = join(consumerRoot, ".claude");
   const subdir = join(consumerRoot, "subdir");
+  const packageRoot = join(consumerRoot, "node_modules", "scope-guard");
   const hookPath = join(consumerRoot, "node_modules", "scope-guard", "dist", "hook.js");
   const postHookPath = join(consumerRoot, "node_modules", "scope-guard", "dist", "hook-post.js");
   const env = { ...process.env, npm_config_cache: npmCache, CLAUDE_PROJECT_DIR: consumerRoot };
@@ -128,6 +130,22 @@ try {
 
   assert.ok(preCommands.includes(expectedPre), "PreToolUse hook command was not installed");
   assert.ok(postCommands.includes(expectedPost), "PostToolUse hook command was not installed");
+
+  const pluginManifest = readJson(join(packageRoot, ".claude-plugin", "plugin.json"));
+  assert.equal(pluginManifest.skills, "./skills");
+  assert.equal(pluginManifest.hooks, "./hooks/hooks.json");
+  assert.ok(existsSync(join(packageRoot, pluginManifest.skills)), "Plugin skills path is missing");
+  assert.ok(existsSync(join(packageRoot, pluginManifest.hooks)), "Plugin hook manifest is missing");
+  assert.ok(
+    existsSync(join(packageRoot, pluginManifest.skills, "scope-guard", "SKILL.md")),
+    "Plugin skills directory does not include scope-guard/SKILL.md",
+  );
+
+  const pluginHooks = readJson(join(packageRoot, pluginManifest.hooks));
+  const pluginPreCommands = listCommands(pluginHooks, "PreToolUse");
+  const pluginPostCommands = listCommands(pluginHooks, "PostToolUse");
+  assert.ok(pluginPreCommands.includes(expectedPre), "Plugin PreToolUse hook is stale");
+  assert.ok(pluginPostCommands.includes(expectedPost), "Plugin PostToolUse hook is stale");
 
   mkdirSync(join(consumerRoot, "src"), { recursive: true });
   mkdirSync(subdir, { recursive: true });

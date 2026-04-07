@@ -66,24 +66,38 @@ The init command is idempotent — safe to run multiple times. It:
 <summary>Manual setup (alternative)</summary>
 
 ```bash
-# Add hook to .claude/settings.json
-cat <<'EOF' >> .claude/settings.json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook.js\""}]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "",
-        "hooks": [{"type": "command", "command": "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook-post.js\""}]
-      }
-    ]
+# Merge hooks into .claude/settings.json safely
+mkdir -p .claude
+node <<'EOF'
+const fs = require("node:fs");
+
+const path = ".claude/settings.json";
+const settings = fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, "utf8")) : {};
+const hooks = settings.hooks ?? {};
+
+const preToolUse = {
+  matcher: "",
+  hooks: [{ type: "command", command: "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook.js\"" }],
+};
+
+const postToolUse = {
+  matcher: "",
+  hooks: [{ type: "command", command: "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook-post.js\"" }],
+};
+
+const ensureHook = (name, entry) => {
+  const items = Array.isArray(hooks[name]) ? hooks[name] : [];
+  if (!items.some((item) => JSON.stringify(item) === JSON.stringify(entry))) {
+    items.push(entry);
   }
-}
+  hooks[name] = items;
+};
+
+ensureHook("PreToolUse", preToolUse);
+ensureHook("PostToolUse", postToolUse);
+
+settings.hooks = hooks;
+fs.writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
 EOF
 
 # Copy SKILL.md

@@ -9,7 +9,7 @@ metadata:
   tags: "scope-guard,safety,risk,approval-gate,drift-prevention,guardrail,permission,boundary"
   openclaw:
     emoji: "🛡️"
-    homepage: "https://github.com/aaron-he-zhu/preflight-scope"
+    homepage: "https://github.com/aaron-he-zhu/scope-guard"
     always: false
     skillKey: scope-guard
 ---
@@ -293,7 +293,7 @@ mkdir -p .claude/skills/scope-guard
 cp SKILL.md .claude/skills/scope-guard/
 
 # Option B: via skills.sh
-npx skills add aaron-he-zhu/preflight-scope
+npx skills add aaron-he-zhu/scope-guard
 ```
 
 ### OpenClaw / ClawHub
@@ -322,10 +322,11 @@ scope-guard package:
 
 ```bash
 npm install scope-guard
+npx scope-guard-init
 ```
 
-Then add to `.claude/settings.json` (Claude Code) or configure a pre-tool hook
-in your agent:
+If you prefer manual setup, add to `.claude/settings.json` (Claude Code) or
+configure equivalent hooks in your agent:
 
 ```json
 {
@@ -333,7 +334,13 @@ in your agent:
     "PreToolUse": [
       {
         "matcher": "",
-        "hooks": [{"type": "command", "command": "node dist/hook.js"}]
+        "hooks": [{"type": "command", "command": "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook.js\""}]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [{"type": "command", "command": "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook-post.js\""}]
       }
     ]
   }
@@ -341,7 +348,7 @@ in your agent:
 ```
 
 This adds a Node.js hook that intercepts every tool call with deterministic
-pattern matching, exit-code-based verdicts (0=allow, 1=warn, 2=block), and an
+pattern matching, structured allow/ask/deny decisions, and an
 append-only JSONL audit trail at `.claude/scope-guard-audit.jsonl`.
 
 ---
@@ -356,4 +363,4 @@ append-only JSONL audit trail at `.claude/scope-guard-audit.jsonl`.
 
 ## Issues & feedback
 
-Report bugs at [github.com/aaron-he-zhu/preflight-scope/issues](https://github.com/aaron-he-zhu/preflight-scope/issues).
+Report bugs at [github.com/aaron-he-zhu/scope-guard/issues](https://github.com/aaron-he-zhu/scope-guard/issues).

@@ -12,9 +12,13 @@
         "type": "string",
         "description": "Path to scope-boundary.json (default: .claude/scope-boundary.json)"
       },
+      "policyPath": {
+        "type": "string",
+        "description": "Path to scope-guard policy JSON (default: .claude/scope-guard-policy.json)"
+      },
       "rulesPath": {
         "type": "string",
-        "description": "Path to custom risk rules YAML (default: built-in rules)"
+        "description": "Deprecated alias for policyPath; path to scope-guard policy JSON"
       },
       "auditLogPath": {
         "type": "string",
@@ -24,7 +28,8 @@
   },
   "uiHints": {
     "scopePath": { "label": "Scope boundary file", "placeholder": ".claude/scope-boundary.json" },
-    "rulesPath": { "label": "Custom rules file", "placeholder": ".claude/scope-guard-rules.yaml" },
+    "policyPath": { "label": "Policy file", "placeholder": ".claude/scope-guard-policy.json" },
+    "rulesPath": { "label": "Policy file (legacy)", "placeholder": ".claude/scope-guard-policy.json" },
     "auditLogPath": { "label": "Audit log file", "placeholder": ".claude/scope-guard-audit.jsonl" }
   }
 }
