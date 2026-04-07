@@ -15,11 +15,11 @@
     "./output-filter": "./dist/output-filter.js"
   },
   "bin": {
-    "scope-guard": "./dist/cli.js",
-    "scope-guard-hook": "./dist/hook.js",
-    "scope-guard-init": "./dist/init.js",
-    "scope-guard-cli": "./dist/cli.js",
-    "scope-guard-post": "./dist/hook-post.js"
+    "scope-guard": "dist/cli.js",
+    "scope-guard-hook": "dist/hook.js",
+    "scope-guard-init": "dist/init.js",
+    "scope-guard-cli": "dist/cli.js",
+    "scope-guard-post": "dist/hook-post.js"
   },
   "files": [
     "dist",
@@ -64,7 +64,7 @@
   "homepage": "https://github.com/aaron-he-zhu/scope-guard",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aaron-he-zhu/scope-guard.git"
+    "url": "git+https://github.com/aaron-he-zhu/scope-guard.git"
   },
   "bugs": {
     "url": "https://github.com/aaron-he-zhu/scope-guard/issues"
