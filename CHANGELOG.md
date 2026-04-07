@@ -8,15 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-04-07
 
 ### Added
-- ScopeChecker with verdict matrix: ALLOW / WARN / BLOCK
-- RiskEngine with 14 built-in risk rules (rm -rf, git push --force, DROP TABLE, npm publish, secret files, etc.)
+- ScopeChecker with 4-verdict matrix: ALLOW / WARN / ESCALATE / BLOCK
+- RiskEngine with 38 built-in risk rules covering shell, MCP, compliance, and industry-specific risk patterns
 - ScopeBoundary with path normalization and traversal prevention
 - AuditLog with append-only JSONL and HMAC integrity signing
-- CLI hook entry point (`hook.ts`) — stdin JSON, exit codes 0/1/2
+- Claude hook entry points for PreToolUse and PostToolUse
 - OpenClaw plugin entry point (`index.ts`) — `before_tool_call` hook
 - SKILL.md for prompt-level enforcement (AgentSkills open standard)
 - Dual-platform support: Claude Code (.claude-plugin) + OpenClaw (openclaw.plugin.json)
-- 104+ tests across 11 suites using Node built-in test runner
+- 200+ tests across policy, audit, hook, MCP, and packaging paths using Node built-in test runner
 - scope-boundary.schema.json for editor autocompletion
 - GitHub Actions CI (test on every push/PR)
 
