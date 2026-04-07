@@ -89,7 +89,7 @@ function paramsToStr(params: Record<string, unknown> | string): string {
   return typeof params === "string" ? params : JSON.stringify(params);
 }
 
-/** Built-in risk rules matching src/preflight/rules/default.yaml */
+/** Built-in risk rules. */
 export function builtinRules(): RiskRule[] {
   return [
     // --- HIGH risk ---
@@ -148,6 +148,13 @@ export function builtinRules(): RiskRule[] {
       pattern: "(curl\\s+.*?-X\\s*(POST|PUT|DELETE|PATCH)|wget\\s+.*?--post)",
       risk: RiskLevel.HIGH,
       description: "HTTP mutation via curl or wget",
+    }),
+    new RiskRule({
+      name: "sensitive_file_read",
+      tool: "Bash",
+      pattern: "\\b(cat|head|tail|less|more|strings|xxd|hexdump)\\b.*(/etc/(shadow|passwd|sudoers)|\\.(env|pem|key|secret|credentials)([\"'\\s}]|$))",
+      risk: RiskLevel.MEDIUM,
+      description: "Reading sensitive system or credential files",
     }),
     // --- MEDIUM risk ---
     new RiskRule({

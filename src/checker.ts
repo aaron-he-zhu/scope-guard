@@ -39,6 +39,18 @@ export class ScopeChecker {
   }
 
   check(toolName: string, params: Record<string, unknown>): CheckResult {
+    // 0. Empty or missing tool name — warn, not silently allow.
+    if (!toolName) {
+      return {
+        verdict: CheckVerdict.WARN,
+        tool: toolName,
+        target: "",
+        reason: "empty or missing tool name",
+        risk_level: RiskLevel.LOW,
+        scope_violation: false,
+      };
+    }
+
     // 1. Read-only tools are always allowed.
     if (READ_ONLY_TOOLS.has(toolName)) {
       return {

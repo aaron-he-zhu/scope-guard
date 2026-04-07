@@ -87,7 +87,14 @@ describe("RiskEngine", () => {
   it("Read tool is LOW", () => assert.equal(engine.assess("Read", { file_path: "f.ts" }), RiskLevel.LOW));
   it("empty command is LOW", () => assert.equal(engine.assess("Bash", { command: "" }), RiskLevel.LOW));
 
-  it("builtin rules count is 13", () => assert.equal(builtinRules().length, 13));
+  // Sensitive file reads
+  it("cat /etc/shadow is MEDIUM", () => assert.equal(engine.assess("Bash", { command: "cat /etc/shadow" }), RiskLevel.MEDIUM));
+  it("cat /etc/passwd is MEDIUM", () => assert.equal(engine.assess("Bash", { command: "cat /etc/passwd" }), RiskLevel.MEDIUM));
+  it("cat /etc/sudoers is MEDIUM", () => assert.equal(engine.assess("Bash", { command: "cat /etc/sudoers" }), RiskLevel.MEDIUM));
+  it("head .env is HIGH (secret_files rule)", () => assert.equal(engine.assess("Bash", { command: "head .env" }), RiskLevel.HIGH));
+  it("cat safe file is LOW", () => assert.equal(engine.assess("Bash", { command: "cat README.md" }), RiskLevel.LOW));
+
+  it("builtin rules count is 14", () => assert.equal(builtinRules().length, 14));
 
   it("matchingRules returns applicable rules", () => {
     const rules = engine.matchingRules("Bash", { command: "curl -X POST http://api" });
@@ -277,6 +284,12 @@ describe("ScopeChecker", () => {
     assert.equal(r.verdict, CheckVerdict.ALLOW);
     assert.equal(r.scope_violation, false);
   });
+
+  it("empty tool name returns WARN", () => {
+    const r = checker.check("", {});
+    assert.equal(r.verdict, CheckVerdict.WARN);
+    assert.equal(r.reason, "empty or missing tool name");
+  });
 });
 
 describe("ScopeChecker empty scope", () => {
@@ -441,6 +454,20 @@ describe("hook.ts integration", () => {
     assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
     assert.equal(result.verdict, "allow");
+  });
+
+  it("warn on empty tool name", () => {
+    const { stdout, exitCode } = runHook(JSON.stringify({ tool_name: "", tool_input: {} }));
+    assert.equal(exitCode, 1);
+    const result = JSON.parse(stdout);
+    assert.equal(result.verdict, "warn");
+  });
+
+  it("warn on cat /etc/shadow", () => {
+    const { stdout, exitCode } = runHook(JSON.stringify({ tool_name: "Bash", tool_input: { command: "cat /etc/shadow" } }));
+    assert.equal(exitCode, 1);
+    const result = JSON.parse(stdout);
+    assert.equal(result.verdict, "warn");
   });
 });
 
