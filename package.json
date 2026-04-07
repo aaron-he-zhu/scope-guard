@@ -41,6 +41,7 @@
     "build": "tsc",
     "check": "tsc --noEmit",
     "test": "node --test dist/test.js",
+    "test:package-smoke": "node ./scripts/package-smoke.mjs",
     "clean": "rm -rf dist"
   },
   "keywords": [

@@ -5,8 +5,8 @@ Thank you for your interest in contributing to Scope Guard!
 ## Getting started
 
 ```bash
-git clone https://github.com/aaron-he-zhu/preflight-scope.git
-cd preflight-scope
+git clone https://github.com/aaron-he-zhu/scope-guard.git
+cd scope-guard
 npm install
 npm run build
 npm test
@@ -16,9 +16,10 @@ npm test
 
 1. Create a branch from `main`
 2. Make your changes in `src/`
-3. Run `npm run build && npm test` — all 200+ tests must pass
-4. Commit with a clear message describing **what** and **why**
-5. Open a pull request
+3. Run `npm run build && npm test` — all tests must pass
+4. For packaging or hook changes, also run `npm pack --json` and `npm run test:package-smoke -- <tarball>`
+5. Commit with a clear message describing **what** and **why**
+6. Open a pull request
 
 ## Project structure
 
@@ -28,9 +29,12 @@ src/
   risk.ts      — RiskEngine: regex-based risk classification
   scope.ts     — ScopeBoundary: file/dir scope management
   audit.ts     — AuditLog: JSONL append-only audit trail
-  hook.ts      — CLI entry point (stdin JSON → exit code)
+  hook.ts      — Claude Code PreToolUse hook entry point
+  hook-post.ts — Claude Code PostToolUse hook entry point
   index.ts     — OpenClaw plugin entry point
   test.ts      — Full test suite (node:test)
+scripts/
+  package-smoke.mjs — package/install/hook smoke test for CI and local verification
 ```
 
 ## Adding a risk rule
