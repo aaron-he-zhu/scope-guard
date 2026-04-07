@@ -6,8 +6,8 @@
     "name": "aaron-he-zhu",
     "url": "https://github.com/aaron-he-zhu"
   },
-  "homepage": "https://github.com/aaron-he-zhu/preflight-scope",
-  "repository": "https://github.com/aaron-he-zhu/preflight-scope",
+  "homepage": "https://github.com/aaron-he-zhu/scope-guard",
+  "repository": "https://github.com/aaron-he-zhu/scope-guard",
   "license": "MIT",
   "keywords": ["scope-guard", "safety", "guardrail", "risk", "approval-gate", "drift-prevention"],
   "skills": "./.claude/skills/",

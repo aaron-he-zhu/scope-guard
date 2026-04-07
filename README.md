@@ -199,7 +199,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, project structure,
 
 ## Issues & feedback
 
-Report bugs or request features at [github.com/aaron-he-zhu/preflight-scope/issues](https://github.com/aaron-he-zhu/preflight-scope/issues).
+Report bugs or request features at [github.com/aaron-he-zhu/scope-guard/issues](https://github.com/aaron-he-zhu/scope-guard/issues).
 
 ## License
 

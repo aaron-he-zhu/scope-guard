@@ -1557,6 +1557,24 @@ describe("policy enforcement", () => {
   });
 });
 
+describe("package metadata", () => {
+  it("maps the primary scope-guard bin to the CLI entrypoint", () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf-8"));
+    assert.equal(pkg.bin["scope-guard"], "./dist/cli.js");
+    assert.equal(pkg.bin["scope-guard-hook"], "./dist/hook.js");
+  });
+
+  it("points package metadata at the scope-guard repository", () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf-8"));
+    const plugin = JSON.parse(readFileSync(join(import.meta.dirname, "..", ".claude-plugin", "plugin.json"), "utf-8"));
+    assert.equal(pkg.repository.url, "https://github.com/aaron-he-zhu/scope-guard.git");
+    assert.equal(pkg.homepage, "https://github.com/aaron-he-zhu/scope-guard");
+    assert.equal(pkg.bugs.url, "https://github.com/aaron-he-zhu/scope-guard/issues");
+    assert.equal(plugin.repository, "https://github.com/aaron-he-zhu/scope-guard");
+    assert.equal(plugin.homepage, "https://github.com/aaron-he-zhu/scope-guard");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // v2: Output filter
 // ---------------------------------------------------------------------------
