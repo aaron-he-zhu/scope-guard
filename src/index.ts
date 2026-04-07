@@ -9,15 +9,14 @@
  *   2. This hook (deterministic) — blocks/approves via exit semantics
  */
 
-import { join } from "node:path";
 import { ScopeChecker, CheckVerdict } from "./checker.js";
-import { RiskEngine } from "./risk.js";
-import { ScopeBoundary } from "./scope.js";
 import { AuditLog } from "./audit.js";
+import { loadEnforcementRuntime } from "./runtime.js";
 
 interface PluginConfig {
   scopePath?: string;
   rulesPath?: string;
+  policyPath?: string;
   auditLogPath?: string;
 }
 
@@ -31,6 +30,7 @@ interface BeforeToolCallResult {
   block?: boolean;
   blockReason?: string;
   requireApproval?: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 interface PluginAPI {
@@ -64,29 +64,16 @@ export default definePluginEntry({
         try {
           const config = api.getConfig();
           const workspacePath = api.getWorkspacePath();
-
-          // Resolve paths from config or defaults
-          const scopePath = config.scopePath
-            ? join(workspacePath, config.scopePath)
-            : join(workspacePath, ".claude", "scope-boundary.json");
-
-          const auditLogPath = config.auditLogPath
-            ? join(workspacePath, config.auditLogPath)
-            : join(workspacePath, ".claude", "scope-guard-audit.jsonl");
-
-          // Load scope boundary
-          const boundary = ScopeBoundary.load(scopePath);
-
-          // Build risk engine (builtin rules only in plugin mode)
-          const engine = RiskEngine.default();
-
-          // Run scope check
-          const checker = new ScopeChecker(boundary, engine);
-          const result = checker.check(event.toolName, event.params);
+          const runtime = loadEnforcementRuntime(workspacePath, {
+            scopePath: config.scopePath,
+            policyPath: config.policyPath ?? config.rulesPath,
+            auditLogPath: config.auditLogPath,
+          });
+          const result = runtime.checker.check(event.toolName, event.params);
 
           // Write audit log
           try {
-            const audit = new AuditLog(auditLogPath);
+            const audit = new AuditLog(runtime.auditLogPath);
             audit.record(result);
           } catch (e) {
             console.error(`[scope-guard] audit write failed: ${e}`);

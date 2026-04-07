@@ -97,7 +97,7 @@ describe("RiskEngine", () => {
   it("head .env is HIGH (secret_files rule)", () => assert.equal(engine.assess("Bash", { command: "head .env" }), RiskLevel.HIGH));
   it("cat safe file is LOW", () => assert.equal(engine.assess("Bash", { command: "cat README.md" }), RiskLevel.LOW));
 
-  it("builtin rules count is 37", () => assert.equal(builtinRules().length, 37));
+  it("builtin rules count is 38", () => assert.equal(builtinRules().length, 38));
 
   // v2 SQL mutation rules
   it("INSERT INTO is HIGH", () => assert.equal(engine.assess("Bash", { command: "INSERT INTO users VALUES (1)" }), RiskLevel.HIGH));
@@ -205,6 +205,17 @@ describe("ScopeBoundary", () => {
   it("load missing returns empty", () => {
     const b = ScopeBoundary.load("/nonexistent/path.json");
     assert.equal(b.isEmpty, true);
+    assert.equal(b.load_state, "missing");
+  });
+
+  it("load array config is invalid", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-boundary-"));
+    const p = join(tmp, "scope.json");
+    writeFileSync(p, "[]\n");
+    const b = ScopeBoundary.load(p);
+    assert.equal(b.load_state, "invalid");
+    assert.ok(b.load_error?.includes("JSON object"));
+    rmSync(tmp, { recursive: true });
   });
 });
 
@@ -220,8 +231,12 @@ describe("ScopeChecker", () => {
   const checker = new ScopeChecker(boundary);
 
   // Read-only tools
-  it("Read is always ALLOW", () => {
-    assert.equal(checker.check("Read", { file_path: "/etc/passwd" }).verdict, CheckVerdict.ALLOW);
+  it("Read in-scope file is ALLOW", () => {
+    assert.equal(checker.check("Read", { file_path: "src/auth/login.ts" }).verdict, CheckVerdict.ALLOW);
+  });
+
+  it("Read sensitive out-of-scope file is WARN", () => {
+    assert.equal(checker.check("Read", { file_path: "/etc/passwd" }).verdict, CheckVerdict.WARN);
   });
 
   it("Glob is always ALLOW", () => {
@@ -238,6 +253,23 @@ describe("ScopeChecker", () => {
 
   it("WebFetch is always ALLOW", () => {
     assert.equal(checker.check("WebFetch", { url: "http://x" }).verdict, CheckVerdict.ALLOW);
+  });
+
+  it("WebFetch blocked URL is BLOCK", () => {
+    const urlChecker = new ScopeChecker(
+      new ScopeBoundary({ resources: { blocked_urls: ["https://example.com/private*"] } }),
+    );
+    const result = urlChecker.check("WebFetch", { url: "https://example.com/private-doc" });
+    assert.equal(result.verdict, CheckVerdict.BLOCK);
+    assert.equal(result.scope_violation, true);
+  });
+
+  it("WebFetch URL allowlist mismatch is BLOCK", () => {
+    const urlChecker = new ScopeChecker(
+      new ScopeBoundary({ resources: { allowed_urls: ["https://docs.example.com/*"] } }),
+    );
+    const result = urlChecker.check("WebFetch", { url: "https://example.com/secret" });
+    assert.equal(result.verdict, CheckVerdict.BLOCK);
   });
 
   it("TodoWrite is always ALLOW", () => {
@@ -322,6 +354,25 @@ describe("ScopeChecker empty scope", () => {
 
   it("rm -rf still blocks", () => {
     assert.equal(checker.check("Bash", { command: "rm -rf /" }).verdict, CheckVerdict.BLOCK);
+  });
+});
+
+describe("ScopeChecker loaded boundary state", () => {
+  it("missing boundary fails closed", () => {
+    const checker = new ScopeChecker(
+      new ScopeBoundary(undefined, { load_state: "missing" }),
+    );
+    const result = checker.check("Edit", { file_path: "src/outside.ts" });
+    assert.equal(result.verdict, CheckVerdict.BLOCK);
+    assert.equal(result.scope_violation, true);
+  });
+
+  it("invalid boundary fails closed", () => {
+    const checker = new ScopeChecker(
+      new ScopeBoundary(undefined, { load_state: "invalid" }),
+    );
+    const result = checker.check("Bash", { command: "ls" });
+    assert.equal(result.verdict, CheckVerdict.BLOCK);
   });
 });
 
@@ -431,6 +482,42 @@ describe("AuditLog", () => {
     const result = log.verify();
     assert.equal(result.tampered, 1);
     assert.equal(result.valid, 0);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("verify fails when key is missing for signed entries", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({ verdict: CheckVerdict.ALLOW, tool: "Read", target: "", reason: "", risk_level: RiskLevel.LOW, scope_violation: false });
+    rmSync(p + ".key");
+    const result = log.verify();
+    assert.equal(result.valid, 0);
+    assert.equal(result.tampered, 1);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("verify counts malformed lines as tampering", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({ verdict: CheckVerdict.ALLOW, tool: "Read", target: "", reason: "", risk_level: RiskLevel.LOW, scope_violation: false });
+    writeFileSync(p, readFileSync(p, "utf-8") + "NOT_JSON\n");
+    const result = log.verify();
+    assert.ok(result.tampered >= 1);
+    assert.ok(result.chain_breaks >= 1);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("record refuses to append after malformed tail", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({ verdict: CheckVerdict.ALLOW, tool: "Read", target: "", reason: "", risk_level: RiskLevel.LOW, scope_violation: false });
+    writeFileSync(p, readFileSync(p, "utf-8") + "NOT_JSON\n");
+    assert.throws(() => {
+      log.record({ verdict: CheckVerdict.WARN, tool: "Bash", target: "", reason: "", risk_level: RiskLevel.MEDIUM, scope_violation: false });
+    }, /malformed/);
     rmSync(tmp, { recursive: true });
   });
 
@@ -547,84 +634,201 @@ describe("hook.ts integration", () => {
     }
   }
 
-  it("allow on Read tool", () => {
-    const { stdout, exitCode } = runHook(JSON.stringify({ tool_name: "Read", tool_input: { file_path: "f.ts" } }));
+  it("allow on in-scope Read tool", () => {
+    const { stdout, exitCode } = runHook(
+      JSON.stringify({ tool_name: "Read", tool_input: { file_path: "f.ts" } }),
+      { files_in_scope: ["f.ts"] },
+    );
     assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "allow");
+    assert.deepEqual(result, {});
   });
 
   it("block on rm -rf", () => {
-    const { stdout, exitCode } = runHook(JSON.stringify({ tool_name: "Bash", tool_input: { command: "rm -rf /" } }));
-    assert.equal(exitCode, 3);
+    const { stdout, exitCode } = runHook(
+      JSON.stringify({ tool_name: "Bash", tool_input: { command: "rm -rf /" } }),
+      { files_in_scope: ["src/app.ts"] },
+    );
+    assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "block");
+    assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
   });
 
   it("warn on curl", () => {
-    const { stdout, exitCode } = runHook(JSON.stringify({ tool_name: "Bash", tool_input: { command: "curl http://x" } }));
-    assert.equal(exitCode, 1);
+    const { stdout, exitCode } = runHook(
+      JSON.stringify({ tool_name: "Bash", tool_input: { command: "curl http://x" } }),
+      { files_in_scope: ["src/app.ts"] },
+    );
+    assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "warn");
+    assert.equal(result.hookSpecificOutput.permissionDecision, "ask");
   });
 
   it("block on empty stdin", () => {
     const { stdout, exitCode } = runHook("");
-    assert.equal(exitCode, 3);
+    assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "block");
+    assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
   });
 
   it("block on malformed JSON", () => {
     const { stdout, exitCode } = runHook("{not json}");
-    assert.equal(exitCode, 3);
+    assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "block");
+    assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
   });
 
   it("block on null payload", () => {
     const { stdout, exitCode } = runHook("null");
-    assert.equal(exitCode, 3);
+    assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "block");
+    assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
   });
 
   it("block on array payload", () => {
     const { stdout, exitCode } = runHook("[]");
-    assert.equal(exitCode, 3);
+    assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "block");
+    assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
   });
 
   it("accepts tool/params field names", () => {
-    const { stdout, exitCode } = runHook(JSON.stringify({ tool: "Read", params: { file_path: "f.ts" } }));
+    const { stdout, exitCode } = runHook(
+      JSON.stringify({ tool: "Read", params: { file_path: "f.ts" } }),
+      { files_in_scope: ["f.ts"] },
+    );
     assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "allow");
+    assert.deepEqual(result, {});
   });
 
   it("warn on empty tool name", () => {
-    const { stdout, exitCode } = runHook(JSON.stringify({ tool_name: "", tool_input: {} }));
-    assert.equal(exitCode, 1);
+    const { stdout, exitCode } = runHook(
+      JSON.stringify({ tool_name: "", tool_input: {} }),
+      { files_in_scope: ["src/app.ts"] },
+    );
+    assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "warn");
+    assert.equal(result.hookSpecificOutput.permissionDecision, "ask");
   });
 
   it("warn on cat /etc/shadow", () => {
-    const { stdout, exitCode } = runHook(JSON.stringify({ tool_name: "Bash", tool_input: { command: "cat /etc/shadow" } }));
-    assert.equal(exitCode, 1);
+    const { stdout, exitCode } = runHook(
+      JSON.stringify({ tool_name: "Bash", tool_input: { command: "cat /etc/shadow" } }),
+      { files_in_scope: ["src/app.ts"] },
+    );
+    assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "warn");
+    assert.equal(result.hookSpecificOutput.permissionDecision, "ask");
   });
 
-  it("hook exit code for escalate is 2", () => {
+  it("escalate maps to ask decision", () => {
     const { stdout, exitCode } = runHook(
       JSON.stringify({ tool_name: "Read", tool_input: { file_path: "lawsuit-doc.md" } }),
-      { resources: { escalation_keywords: ["lawsuit"] } },
+      { files_in_scope: ["lawsuit-doc.md"], resources: { escalation_keywords: ["lawsuit"] } },
     );
-    assert.equal(exitCode, 2);
+    assert.equal(exitCode, 0);
     const result = JSON.parse(stdout);
-    assert.equal(result.verdict, "escalate");
+    assert.equal(result.hookSpecificOutput.permissionDecision, "ask");
+  });
+
+  it("missing boundary denies tool use", () => {
+    const { stdout, exitCode } = runHook(
+      JSON.stringify({ tool_name: "Read", tool_input: { file_path: "f.ts" } }),
+    );
+    assert.equal(exitCode, 0);
+    const result = JSON.parse(stdout);
+    assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
+  });
+
+  it("uses CLAUDE_PROJECT_DIR as hook workspace root", () => {
+    const root = mkdtempSync(join(tmpdir(), "sg-hook-root-"));
+    const subdir = join(root, "nested");
+    mkdirSync(join(root, ".claude"), { recursive: true });
+    mkdirSync(subdir, { recursive: true });
+    writeFileSync(join(root, ".claude", "scope-boundary.json"), JSON.stringify({
+      files_in_scope: ["f.ts"],
+    }));
+    const stdout = execFileSync("node", [hookPath], {
+      input: JSON.stringify({ tool_name: "Read", tool_input: { file_path: "f.ts" } }),
+      encoding: "utf-8",
+      timeout: 5000,
+      env: {
+        ...process.env,
+        HOME: tmpdir(),
+        CLAUDE_PROJECT_DIR: root,
+      },
+      cwd: subdir,
+    });
+    assert.deepEqual(JSON.parse(stdout.trim()), {});
+    rmSync(root, { recursive: true });
+  });
+
+  it("malformed policy denies with structured output", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "sg-hook-policy-"));
+    const claudeDir = join(cwd, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, "scope-boundary.json"), JSON.stringify({
+      files_in_scope: ["f.ts"],
+    }));
+    writeFileSync(join(claudeDir, "scope-guard-policy.json"), "{bad json\n");
+    const stdout = execFileSync("node", [hookPath], {
+      input: JSON.stringify({ tool_name: "Read", tool_input: { file_path: "f.ts" } }),
+      encoding: "utf-8",
+      timeout: 5000,
+      env: { ...process.env, HOME: tmpdir() },
+      cwd,
+    });
+    const result = JSON.parse(stdout.trim());
+    assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
+    assert.ok(String(result.hookSpecificOutput.permissionDecisionReason).includes("configuration error"));
+    rmSync(cwd, { recursive: true });
+  });
+});
+
+describe("hook-post.ts integration", () => {
+  const hookPath = join(import.meta.dirname, "..", "dist", "hook-post.js");
+
+  function runHookPost(
+    input: string,
+    env?: Record<string, string>,
+  ): { stdout: string; exitCode: number } {
+    try {
+      const stdout = execFileSync("node", [hookPath], {
+        input,
+        encoding: "utf-8",
+        timeout: 5000,
+        env: { ...process.env, ...env },
+      });
+      return { stdout: stdout.trim(), exitCode: 0 };
+    } catch (e: unknown) {
+      const err = e as { stdout?: string; status?: number };
+      return { stdout: (err.stdout ?? "").trim(), exitCode: err.status ?? 2 };
+    }
+  }
+
+  it("returns empty JSON for clean output", () => {
+    const { stdout, exitCode } = runHookPost(JSON.stringify({ tool_response: "hello" }));
+    assert.equal(exitCode, 0);
+    assert.deepEqual(JSON.parse(stdout), {});
+  });
+
+  it("blocks on sensitive tool_response", () => {
+    const { stdout, exitCode } = runHookPost(JSON.stringify({ tool_response: "SSN: 123-45-6789" }));
+    assert.equal(exitCode, 0);
+    const result = JSON.parse(stdout);
+    assert.equal(result.decision, "block");
+    assert.ok(String(result.reason).includes("Sensitive content"));
+  });
+
+  it("redacts raw text output when enabled", () => {
+    const { stdout, exitCode } = runHookPost("SSN: 123-45-6789", {
+      SCOPE_GUARD_REDACT_OUTPUT: "1",
+    });
+    assert.equal(exitCode, 0);
+    const result = JSON.parse(stdout);
+    assert.equal(result.decision, "block");
+    assert.ok(String(result.hookSpecificOutput.additionalContext).includes("[REDACTED:ssn]"));
   });
 });
 
@@ -667,6 +871,11 @@ describe("index.ts plugin", () => {
     let handler: (event: Record<string, unknown>) => Promise<Record<string, unknown>> = async () => ({});
 
     const tmp = mkdtempSync(join(tmpdir(), "sg-plugin-"));
+    const claudeDir = join(tmp, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, "scope-boundary.json"), JSON.stringify({
+      files_in_scope: ["f.ts"],
+    }));
     const mockApi = {
       registerHook(_event: string, h: typeof handler) { handler = h; },
       getConfig: () => ({}),
@@ -677,6 +886,24 @@ describe("index.ts plugin", () => {
     const result = await handler({ toolName: "Read", toolCallId: "1", params: { file_path: "f.ts" } });
     assert.equal(result.block, undefined);
     assert.equal(result.requireApproval, undefined);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("hook blocks when boundary is missing", async () => {
+    const mod = await import("./index.js");
+    const plugin = mod.default;
+    let handler: (event: Record<string, unknown>) => Promise<Record<string, unknown>> = async () => ({});
+
+    const tmp = mkdtempSync(join(tmpdir(), "sg-plugin-"));
+    const mockApi = {
+      registerHook(_event: string, h: typeof handler) { handler = h; },
+      getConfig: () => ({}),
+      getWorkspacePath: () => tmp,
+    };
+
+    plugin.register(mockApi as never);
+    const result = await handler({ toolName: "Read", toolCallId: "missing", params: { file_path: "f.ts" } });
+    assert.equal(result.block, true);
     rmSync(tmp, { recursive: true });
   });
 
@@ -771,11 +998,11 @@ describe("mutation resilience", () => {
     assert.notEqual(riskOrd(RiskLevel.MEDIUM), riskOrd(RiskLevel.HIGH));
   });
 
-  // Read-only must not be WARN or BLOCK
-  it("Read tool is strictly ALLOW", () => {
+  // Sensitive reads must not silently allow
+  it("Read of sensitive file is WARN not ALLOW", () => {
     const r = checker.check("Read", { file_path: "/etc/shadow" });
-    assert.equal(r.verdict, CheckVerdict.ALLOW);
-    assert.equal(r.risk_level, RiskLevel.LOW);
+    assert.equal(r.verdict, CheckVerdict.WARN);
+    assert.equal(r.risk_level, RiskLevel.MEDIUM);
   });
 });
 
@@ -796,7 +1023,7 @@ describe("init.ts", () => {
     const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
     assert.ok(settings.hooks?.PreToolUse?.length >= 1);
     const hookCmd = settings.hooks.PreToolUse[0].hooks[0].command;
-    assert.ok(hookCmd.includes("hook.js"));
+    assert.ok(hookCmd.includes("node_modules/scope-guard/dist/hook.js"));
     rmSync(tmp, { recursive: true });
   });
 
@@ -827,6 +1054,55 @@ describe("init.ts", () => {
     const settings = JSON.parse(readFileSync(join(claudeDir, "settings.json"), "utf-8"));
     assert.deepEqual(settings.permissions, { allow: ["Read"] }, "existing settings preserved");
     assert.ok(settings.hooks?.PreToolUse?.length >= 1, "hook added");
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("updates legacy hook commands in place", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-init-"));
+    const claudeDir = join(tmp, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({
+      hooks: {
+        PreToolUse: [{ matcher: "", hooks: [{ type: "command", command: "node dist/hook.js" }] }],
+        PostToolUse: [{ matcher: "", hooks: [{ type: "command", command: "node dist/hook-post.js" }] }],
+      },
+    }, null, 2));
+    execFileSync("node", [join(import.meta.dirname, "..", "dist", "init.js")], {
+      cwd: tmp,
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    const settings = JSON.parse(readFileSync(join(claudeDir, "settings.json"), "utf-8"));
+    assert.equal(settings.hooks.PreToolUse.length, 1);
+    assert.equal(settings.hooks.PostToolUse.length, 1);
+    assert.equal(
+      settings.hooks.PreToolUse[0].hooks[0].command,
+      "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook.js\"",
+    );
+    assert.equal(
+      settings.hooks.PostToolUse[0].hooks[0].command,
+      "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook-post.js\"",
+    );
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("copies the bundled skill instead of a consumer-local SKILL.md", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-init-"));
+    writeFileSync(join(tmp, "SKILL.md"), "local skill that should not be copied\n");
+    execFileSync("node", [join(import.meta.dirname, "..", "dist", "init.js")], {
+      cwd: tmp,
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    const installedSkill = readFileSync(
+      join(tmp, ".claude", "skills", "scope-guard", "SKILL.md"),
+      "utf-8",
+    );
+    const bundledSkill = readFileSync(
+      join(import.meta.dirname, "..", "skills", "scope-guard", "SKILL.md"),
+      "utf-8",
+    );
+    assert.equal(installedSkill, bundledSkill);
     rmSync(tmp, { recursive: true });
   });
 });
@@ -913,6 +1189,22 @@ describe("MCP tool classification", () => {
   it("MCP with secret in params is BLOCK", () => {
     const r = checker.check("mcp__hubspot__get_contacts", { file_path: ".env" });
     assert.equal(r.verdict, CheckVerdict.BLOCK);
+  });
+
+  it("MCP mixed allowed and blocked resources is BLOCK", () => {
+    const boundary = new ScopeBoundary({
+      resources: {
+        allowed_resources: ["hubspot:contacts:*"],
+        blocked_resources: ["hubspot:deals:*"],
+      },
+    });
+    const mixedChecker = new ScopeChecker(boundary);
+    const r = mixedChecker.check("mcp__hubspot__update_record", {
+      contact_id: "123",
+      deal_id: "456",
+    });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+    assert.equal(r.scope_violation, true);
   });
 });
 
@@ -1163,6 +1455,29 @@ describe("PolicyConfig", () => {
     assert.equal(engine.assess("Bash", { command: "my_dangerous_cmd" }), RiskLevel.HIGH);
   });
 
+  it("buildRiskEngine applies tool_overrides as a risk floor", () => {
+    const engine = buildRiskEngine({
+      tool_overrides: { Read: RiskLevel.HIGH },
+    });
+    assert.equal(engine.assess("Read", { file_path: "notes.txt" }), RiskLevel.HIGH);
+  });
+
+  it("extends + compliance_mode still applies the compliance preset", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-policy-"));
+    const basePath = join(tmp, "base.json");
+    const childPath = join(tmp, "child.json");
+    writeFileSync(basePath, JSON.stringify({ blocked_tools: ["Bash"] }));
+    writeFileSync(childPath, JSON.stringify({
+      extends: "base.json",
+      compliance_mode: "hipaa",
+    }));
+    const loaded = loadPolicy(childPath);
+    assert.ok(loaded.blocked_tools?.includes("Bash"));
+    assert.equal(loaded.require_scope_boundary, true);
+    assert.ok(loaded.extra_rules && loaded.extra_rules.length > 0);
+    rmSync(tmp, { recursive: true });
+  });
+
   it("most-restrictive-wins for max_risk_auto_allow", () => {
     const tmp = mkdtempSync(join(tmpdir(), "sg-policy-"));
     const basePath = join(tmp, "base.json");
@@ -1204,6 +1519,41 @@ describe("validatePolicy", () => {
       tool_overrides: { Bash: "extreme" as any },
     });
     assert.equal(result.valid, false);
+  });
+});
+
+describe("policy enforcement", () => {
+  it("blocked_tools are enforced by ScopeChecker", () => {
+    const checker = new ScopeChecker(
+      new ScopeBoundary({ files_in_scope: ["src/app.ts"] }),
+      undefined,
+      undefined,
+      { blocked_tools: ["Bash"] },
+    );
+    const result = checker.check("Bash", { command: "echo ok" });
+    assert.equal(result.verdict, CheckVerdict.BLOCK);
+  });
+
+  it("require_scope_boundary blocks empty loaded boundaries", () => {
+    const checker = new ScopeChecker(
+      new ScopeBoundary({}),
+      undefined,
+      undefined,
+      { require_scope_boundary: true },
+    );
+    const result = checker.check("Read", { file_path: "notes.txt" });
+    assert.equal(result.verdict, CheckVerdict.BLOCK);
+  });
+
+  it("max_risk_auto_allow can allow medium-risk reads", () => {
+    const checker = new ScopeChecker(
+      new ScopeBoundary({ files_in_scope: ["/etc/passwd"] }),
+      undefined,
+      undefined,
+      { max_risk_auto_allow: RiskLevel.MEDIUM },
+    );
+    const result = checker.check("Read", { file_path: "/etc/passwd" });
+    assert.equal(result.verdict, CheckVerdict.ALLOW);
   });
 });
 

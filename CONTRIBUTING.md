@@ -16,7 +16,7 @@ npm test
 
 1. Create a branch from `main`
 2. Make your changes in `src/`
-3. Run `npm run build && npm test` — all 104+ tests must pass
+3. Run `npm run build && npm test` — all 200+ tests must pass
 4. Commit with a clear message describing **what** and **why**
 5. Open a pull request
 

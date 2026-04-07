@@ -46,6 +46,11 @@ export interface VerifyResult {
   chain_breaks: number;
 }
 
+interface ParsedAuditLine {
+  entry?: AuditEntry;
+  malformed: boolean;
+}
+
 /** Resolve HMAC key: env var takes precedence, then file-based key. */
 function getHmacKey(logPath: string): string {
   const envKey = process.env.SCOPE_GUARD_HMAC_KEY;
@@ -110,39 +115,55 @@ export class AuditLog {
   }
 
   read(limit = 50): AuditEntry[] {
-    if (!existsSync(this.path)) return [];
-    const entries: AuditEntry[] = [];
-    for (const line of readFileSync(this.path, "utf-8").trim().split("\n")) {
-      if (!line) continue;
-      try {
-        entries.push(JSON.parse(line) as AuditEntry);
-      } catch {
-        continue; // skip malformed lines
-      }
-    }
-    return entries.slice(-limit);
+    return this.parseLines(limit)
+      .flatMap((line) => (line.entry ? [line.entry] : []));
   }
 
   /** Verify HMAC integrity and hash chain of all audit entries. */
   verify(): VerifyResult {
-    const entries = this.read(50_000);
+    const parsedLines = this.parseLines(50_000);
+    const entries = parsedLines.flatMap((line) => (line.entry ? [line.entry] : []));
     const keyPath = this.path + ".key";
     const envKey = process.env.SCOPE_GUARD_HMAC_KEY;
     const hasKey = (envKey && envKey.length >= 16) || existsSync(keyPath);
-    if (!hasKey) return { valid: 0, tampered: 0, unsigned: entries.length, chain_breaks: 0 };
 
-    const key = getHmacKey(this.path);
     let valid = 0;
-    let tampered = 0;
+    let tampered = parsedLines.filter((line) => line.malformed).length;
     let unsigned = 0;
     let chainBreaks = 0;
 
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      if (!entry.hmac) {
-        unsigned++;
+    const signedEntries = entries.filter((entry) => !!entry.hmac);
+    if (!hasKey) {
+      return {
+        valid,
+        tampered: tampered + signedEntries.length,
+        unsigned: entries.length - signedEntries.length,
+        chain_breaks: parsedLines.some((line) => line.malformed) ? 1 : 0,
+      };
+    }
+
+    const key = getHmacKey(this.path);
+    let previousEntry: AuditEntry | undefined;
+    let sawPreviousLine = false;
+
+    for (const parsedLine of parsedLines) {
+      if (parsedLine.malformed) {
+        chainBreaks++;
+        previousEntry = undefined;
+        sawPreviousLine = true;
         continue;
       }
+
+      const entry = parsedLine.entry!;
+      if (!entry.hmac) {
+        unsigned++;
+        if (sawPreviousLine && entry.prev_hash) chainBreaks++;
+        if (sawPreviousLine && !entry.prev_hash) chainBreaks++;
+        previousEntry = entry;
+        sawPreviousLine = true;
+        continue;
+      }
+
       const { hmac, ...rest } = entry;
       const expected = computeHmac(rest, key);
       if (hmac === expected) {
@@ -152,12 +173,19 @@ export class AuditLog {
       }
 
       // Check hash chain
-      if (i > 0 && entry.prev_hash) {
-        const prevExpected = entryHash(entries[i - 1]);
-        if (entry.prev_hash !== prevExpected) {
+      if (sawPreviousLine) {
+        if (!entry.prev_hash || !previousEntry) {
           chainBreaks++;
+        } else {
+          const prevExpected = entryHash(previousEntry);
+          if (entry.prev_hash !== prevExpected) {
+            chainBreaks++;
+          }
         }
       }
+
+      previousEntry = entry;
+      sawPreviousLine = true;
     }
 
     return { valid, tampered, unsigned, chain_breaks: chainBreaks };
@@ -219,7 +247,23 @@ export class AuditLog {
       const entry = JSON.parse(lastLine) as AuditEntry;
       return entryHash(entry);
     } catch {
-      return undefined;
+      throw new Error("audit log tail is malformed");
     }
+  }
+
+  private parseLines(limit: number): ParsedAuditLine[] {
+    if (!existsSync(this.path)) return [];
+    const raw = readFileSync(this.path, "utf-8").trim();
+    if (!raw) return [];
+    const lines = raw.split("\n");
+    const parsed = lines.map((line) => {
+      if (!line) return { malformed: false } satisfies ParsedAuditLine;
+      try {
+        return { entry: JSON.parse(line) as AuditEntry, malformed: false };
+      } catch {
+        return { malformed: true };
+      }
+    });
+    return parsed.slice(-limit);
   }
 }

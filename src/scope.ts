@@ -60,9 +60,31 @@ export interface ScopeBoundaryData {
   expand_requires_reason?: boolean;
 }
 
+export type ScopeBoundaryLoadState = "explicit" | "loaded" | "missing" | "invalid";
+
+type ResourceMatchStatus =
+  | "allowed"
+  | "protected"
+  | "explicit_blocked"
+  | "implicit_blocked"
+  | "default_allowed";
+
 /** Escape special regex characters. */
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function wildcardMatch(pattern: string, value: string): boolean {
+  const re = new RegExp("^" + escapeRegex(pattern).replace(/\\\*/g, ".*") + "$", "i");
+  return re.test(value);
 }
 
 /**
@@ -107,6 +129,103 @@ function globSegmentMatch(pattern: string, value: string): boolean {
   return pi === pParts.length && vi === vParts.length;
 }
 
+function validateScopeBoundaryData(raw: unknown): {
+  valid: boolean;
+  data?: Partial<ScopeBoundaryData>;
+  error?: string;
+} {
+  if (!isPlainObject(raw)) {
+    return { valid: false, error: "scope boundary must be a JSON object" };
+  }
+
+  const stringArrayFields = ["files_in_scope", "dirs_in_scope"] as const;
+  for (const field of stringArrayFields) {
+    const value = raw[field];
+    if (value !== undefined && !isStringArray(value)) {
+      return { valid: false, error: `${field} must be an array of strings` };
+    }
+  }
+
+  if (raw.assumptions !== undefined && !Array.isArray(raw.assumptions)) {
+    return { valid: false, error: "assumptions must be an array" };
+  }
+
+  if (raw.revisions !== undefined && !Array.isArray(raw.revisions)) {
+    return { valid: false, error: "revisions must be an array" };
+  }
+
+  if (raw.risk_level !== undefined && typeof raw.risk_level !== "string") {
+    return { valid: false, error: "risk_level must be a string" };
+  }
+
+  if (raw.approval_required !== undefined && typeof raw.approval_required !== "boolean") {
+    return { valid: false, error: "approval_required must be a boolean" };
+  }
+
+  if (raw.task_summary !== undefined && typeof raw.task_summary !== "string") {
+    return { valid: false, error: "task_summary must be a string" };
+  }
+
+  if (raw.created_at !== undefined && typeof raw.created_at !== "string") {
+    return { valid: false, error: "created_at must be a string" };
+  }
+
+  if (raw.expand_requires_reason !== undefined && typeof raw.expand_requires_reason !== "boolean") {
+    return { valid: false, error: "expand_requires_reason must be a boolean" };
+  }
+
+  if (raw.resources !== undefined) {
+    if (!isPlainObject(raw.resources)) {
+      return { valid: false, error: "resources must be a JSON object" };
+    }
+    for (const field of [
+      "allowed_resources",
+      "blocked_resources",
+      "protected_resources",
+      "allowed_urls",
+      "blocked_urls",
+      "escalation_keywords",
+      "blocked_keywords",
+    ] as const) {
+      const value = raw.resources[field];
+      if (value !== undefined && !isStringArray(value)) {
+        return { valid: false, error: `resources.${field} must be an array of strings` };
+      }
+    }
+  }
+
+  if (raw.org_boundary !== undefined) {
+    if (!isPlainObject(raw.org_boundary)) {
+      return { valid: false, error: "org_boundary must be a JSON object" };
+    }
+    for (const field of ["allowed_mcp_servers", "blocked_mcp_servers"] as const) {
+      const value = raw.org_boundary[field];
+      if (value !== undefined && !isStringArray(value)) {
+        return { valid: false, error: `org_boundary.${field} must be an array of strings` };
+      }
+    }
+    const rules = raw.org_boundary.mcp_resource_rules;
+    if (rules !== undefined) {
+      if (!Array.isArray(rules)) {
+        return { valid: false, error: "org_boundary.mcp_resource_rules must be an array" };
+      }
+      for (const [index, rule] of rules.entries()) {
+        if (!isPlainObject(rule) || typeof rule.server !== "string") {
+          return { valid: false, error: `org_boundary.mcp_resource_rules[${index}] must include a string server` };
+        }
+        if (rule.allowed_operations !== undefined && !isStringArray(rule.allowed_operations)) {
+          return { valid: false, error: `org_boundary.mcp_resource_rules[${index}].allowed_operations must be an array of strings` };
+        }
+        if (rule.blocked_operations !== undefined && !isStringArray(rule.blocked_operations)) {
+          return { valid: false, error: `org_boundary.mcp_resource_rules[${index}].blocked_operations must be an array of strings` };
+        }
+      }
+    }
+  }
+
+  return { valid: true, data: raw as Partial<ScopeBoundaryData> };
+}
+
 export class ScopeBoundary {
   files_in_scope: string[];
   dirs_in_scope: string[];
@@ -119,8 +238,13 @@ export class ScopeBoundary {
   resources?: ResourceScope;
   org_boundary?: OrgBoundary;
   expand_requires_reason?: boolean;
+  readonly load_state: ScopeBoundaryLoadState;
+  readonly load_error?: string;
 
-  constructor(data?: Partial<ScopeBoundaryData>) {
+  constructor(
+    data?: Partial<ScopeBoundaryData>,
+    meta?: { load_state?: ScopeBoundaryLoadState; load_error?: string },
+  ) {
     this.files_in_scope = data?.files_in_scope ?? [];
     this.dirs_in_scope = data?.dirs_in_scope ?? [];
     this.assumptions = data?.assumptions ?? [];
@@ -136,6 +260,8 @@ export class ScopeBoundary {
     this.resources = data?.resources;
     this.org_boundary = data?.org_boundary;
     this.expand_requires_reason = data?.expand_requires_reason;
+    this.load_state = meta?.load_state ?? "explicit";
+    this.load_error = meta?.load_error;
   }
 
   get isEmpty(): boolean {
@@ -145,6 +271,20 @@ export class ScopeBoundary {
   get hasOrgBoundary(): boolean {
     const org = this.org_boundary;
     return !!(org?.allowed_mcp_servers?.length || org?.blocked_mcp_servers?.length);
+  }
+
+  get hasResourceRules(): boolean {
+    const res = this.resources;
+    return !!(
+      res?.allowed_resources?.length ||
+      res?.blocked_resources?.length ||
+      res?.protected_resources?.length
+    );
+  }
+
+  get hasUrlRules(): boolean {
+    const res = this.resources;
+    return !!(res?.allowed_urls?.length || res?.blocked_urls?.length);
   }
 
   /** Check if a file path falls within the declared scope. */
@@ -192,15 +332,58 @@ export class ScopeBoundary {
     return true;
   }
 
+  private resourceMatchStatus(resource: string): ResourceMatchStatus {
+    const res = this.resources;
+    if (!res) return "default_allowed";
+    if (res.protected_resources?.some(p => globSegmentMatch(p, resource))) return "protected";
+    if (res.blocked_resources?.some(p => globSegmentMatch(p, resource))) return "explicit_blocked";
+    if (res.allowed_resources && res.allowed_resources.length > 0) {
+      return res.allowed_resources.some(p => globSegmentMatch(p, resource))
+        ? "allowed"
+        : "implicit_blocked";
+    }
+    return "default_allowed";
+  }
+
   isResourceAllowed(resource: string): "allowed" | "blocked" | "protected" {
+    const status = this.resourceMatchStatus(resource);
+    if (status === "protected") return "protected";
+    if (status === "explicit_blocked" || status === "implicit_blocked") return "blocked";
+    return "allowed";
+  }
+
+  isUrlAllowed(url: string): "allowed" | "blocked" {
     const res = this.resources;
     if (!res) return "allowed";
-    if (res.protected_resources?.some(p => globSegmentMatch(p, resource))) return "protected";
-    if (res.blocked_resources?.some(p => globSegmentMatch(p, resource))) return "blocked";
-    if (res.allowed_resources && res.allowed_resources.length > 0) {
-      return res.allowed_resources.some(p => globSegmentMatch(p, resource)) ? "allowed" : "blocked";
+    if (res.blocked_urls?.some((pattern) => wildcardMatch(pattern, url))) return "blocked";
+    if (res.allowed_urls && res.allowed_urls.length > 0) {
+      return res.allowed_urls.some((pattern) => wildcardMatch(pattern, url)) ? "allowed" : "blocked";
     }
     return "allowed";
+  }
+
+  getUrlAccess(url?: string): "allowed" | "blocked" | "unknown" {
+    if (!url) return this.hasUrlRules ? "unknown" : "allowed";
+    return this.isUrlAllowed(url);
+  }
+
+  getResourceAccess(resources: string[]): "allowed" | "blocked" | "protected" | "unknown" {
+    if (resources.length === 0) {
+      return this.hasResourceRules ? "unknown" : "allowed";
+    }
+
+    let sawAllowed = false;
+    let sawImplicitBlocked = false;
+    for (const resource of resources) {
+      const status = this.resourceMatchStatus(resource);
+      if (status === "protected") return "protected";
+      if (status === "explicit_blocked") return "blocked";
+      if (status === "allowed" || status === "default_allowed") sawAllowed = true;
+      if (status === "implicit_blocked") sawImplicitBlocked = true;
+    }
+
+    if (sawAllowed) return "allowed";
+    return sawImplicitBlocked ? "blocked" : "unknown";
   }
 
   matchEscalationKeywords(text: string): string[] {
@@ -274,12 +457,24 @@ export class ScopeBoundary {
   }
 
   static load(path: string): ScopeBoundary {
-    if (!existsSync(path)) return new ScopeBoundary();
+    if (!existsSync(path)) {
+      return new ScopeBoundary(undefined, { load_state: "missing" });
+    }
     try {
-      const data = JSON.parse(readFileSync(path, "utf-8"));
-      return new ScopeBoundary(data);
+      const parsed = JSON.parse(readFileSync(path, "utf-8"));
+      const validated = validateScopeBoundaryData(parsed);
+      if (!validated.valid) {
+        return new ScopeBoundary(undefined, {
+          load_state: "invalid",
+          load_error: validated.error ?? `invalid scope boundary in ${path}`,
+        });
+      }
+      return new ScopeBoundary(validated.data, { load_state: "loaded" });
     } catch {
-      return new ScopeBoundary();
+      return new ScopeBoundary(undefined, {
+        load_state: "invalid",
+        load_error: `failed to parse ${path}`,
+      });
     }
   }
 }
