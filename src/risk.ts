@@ -129,6 +129,13 @@ export function builtinRules(): RiskRule[] {
       description: "Accessing secret or credential files",
     }),
     new RiskRule({
+      name: "sensitive_system_paths",
+      tool: "*",
+      pattern: "/etc/(shadow|passwd|sudoers)",
+      risk: RiskLevel.MEDIUM,
+      description: "Accessing sensitive system files",
+    }),
+    new RiskRule({
       name: "npm_publish",
       tool: "Bash",
       pattern: "\\bnpm\\s+publish\\b",

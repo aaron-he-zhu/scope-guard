@@ -20,6 +20,16 @@
     "scope-guard-cli": "./dist/cli.js",
     "scope-guard-post": "./dist/hook-post.js"
   },
+  "files": [
+    "dist",
+    "skills",
+    ".claude-plugin",
+    "openclaw.plugin.json",
+    "scope-boundary.schema.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "openclaw": {
     "extensions": ["./dist/index.js"],
     "compat": {

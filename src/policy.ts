@@ -43,6 +43,10 @@ export interface ValidateResult {
 
 const MAX_EXTENDS_DEPTH = 5;
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 /** Built-in compliance presets. */
 const PRESETS: Record<ComplianceMode, Partial<PolicyConfig>> = {
   hipaa: {
@@ -177,24 +181,34 @@ export function loadPolicy(policyPath: string, depth = 0): PolicyConfig {
   if (!existsSync(policyPath)) {
     return {};
   }
-  const raw = JSON.parse(readFileSync(policyPath, "utf-8")) as PolicyConfig;
+  let rawValue: unknown;
+  try {
+    rawValue = JSON.parse(readFileSync(policyPath, "utf-8"));
+  } catch {
+    throw new Error(`failed to parse policy file: ${policyPath}`);
+  }
+  if (!isPlainObject(rawValue)) {
+    throw new Error(`policy file must contain a JSON object: ${policyPath}`);
+  }
+  const raw = rawValue as PolicyConfig;
 
   // Resolve extends
+  let resolved: PolicyConfig = raw;
   if (raw.extends) {
     const basePath = resolve(dirname(policyPath), raw.extends);
     const base = loadPolicy(basePath, depth + 1);
-    return mergePolicies(base, raw);
+    resolved = mergePolicies(base, raw);
   }
 
   // Apply compliance preset as base
-  if (raw.compliance_mode && raw.compliance_mode !== "custom") {
-    const preset = PRESETS[raw.compliance_mode];
+  if (resolved.compliance_mode && resolved.compliance_mode !== "custom") {
+    const preset = PRESETS[resolved.compliance_mode];
     if (preset) {
-      return mergePolicies(preset as PolicyConfig, raw);
+      return mergePolicies(preset as PolicyConfig, resolved);
     }
   }
 
-  return raw;
+  return resolved;
 }
 
 /** Merge two policies with most-restrictive-wins semantics. */
@@ -257,6 +271,19 @@ export function buildRiskEngine(config: PolicyConfig): RiskEngine {
         pattern: r.pattern,
         risk: r.risk,
         description: r.description,
+      }));
+    }
+  }
+
+  // Tool overrides act as a minimum risk floor for matching tools.
+  if (config.tool_overrides) {
+    for (const [tool, risk] of Object.entries(config.tool_overrides)) {
+      rules.push(new RiskRule({
+        name: `policy_override_${tool}`,
+        tool,
+        pattern: ".*",
+        risk,
+        description: `Policy risk floor for ${tool}`,
       }));
     }
   }

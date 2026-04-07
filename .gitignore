@@ -1,8 +1,11 @@
 dist/
 node_modules/
 package-lock.json
+*.tgz
+.npm-cache/
 .coverage
 .pytest_cache/
+.claude/settings.json
 .claude/scope-boundary.json
 .claude/scope-guard-audit.jsonl
 .claude/scope-guard-audit.jsonl.key

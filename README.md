@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js >= 22](https://img.shields.io/badge/Node.js-%3E%3D22-green.svg)](https://nodejs.org)
-[![Tests: 104+](https://img.shields.io/badge/Tests-104%2B-brightgreen.svg)](src/test.ts)
+[![Tests: 200+](https://img.shields.io/badge/Tests-200%2B-brightgreen.svg)](src/test.ts)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen.svg)](package.json)
 
 Deterministic safety guardrail for AI coding agents. Prevents scope drift, enforces risk-based approval gates, and surfaces hidden assumptions — with code that the model can't override.
@@ -15,14 +15,14 @@ When AI agents work on your code, they sometimes:
 - **Escalate**: run destructive commands without asking
 - **Assume**: make silent assumptions that lead to wrong changes
 
-Prompt-level instructions help, but the model can ignore them. **Scope Guard enforces boundaries with deterministic code hooks** — exit code 2 means BLOCK, no negotiation.
+Prompt-level instructions help, but the model can ignore them. **Scope Guard enforces boundaries with deterministic code hooks** that return structured Claude Code/OpenClaw decisions the model cannot override.
 
 ### Dual-layer enforcement
 
 | Layer | How | Strength |
 |-------|-----|----------|
 | **SKILL.md** (prompt) | Guides the model to generate scope boundaries and check before acting | Covers ~80% of cases, flexible |
-| **Code hook** (deterministic) | Intercepts every tool call, pattern-matches risk, enforces exit codes | 100% enforcement, cannot be overridden |
+| **Code hook** (deterministic) | Intercepts every tool call, pattern-matches risk, returns structured allow/ask/deny decisions | 100% enforcement, cannot be overridden |
 
 Use one layer or both. SKILL.md alone is a good start. Add the code hook for hard guarantees.
 
@@ -51,18 +51,16 @@ PreToolUse hook (every tool call)
 # 1. Install
 npm install scope-guard
 
-# 2. Build
-npm run build
-
-# 3. Auto-setup (hook + SKILL.md)
+# 2. Auto-setup (hook + SKILL.md)
 npx scope-guard-init
 
 # Done — every tool call is now guarded
 ```
 
 The init command is idempotent — safe to run multiple times. It:
-- Adds the `PreToolUse` hook to `.claude/settings.json` (merges with existing hooks)
-- Copies `SKILL.md` to `.claude/skills/scope-guard/`
+- Adds `PreToolUse` and `PostToolUse` hooks to `.claude/settings.json` (merges with existing hooks)
+- Repairs legacy `node dist/hook*.js` commands in place when present
+- Copies the bundled `skills/scope-guard/SKILL.md` to `.claude/skills/scope-guard/`
 
 <details>
 <summary>Manual setup (alternative)</summary>
@@ -75,7 +73,13 @@ cat <<'EOF' >> .claude/settings.json
     "PreToolUse": [
       {
         "matcher": "",
-        "hooks": [{"type": "command", "command": "node dist/hook.js"}]
+        "hooks": [{"type": "command", "command": "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook.js\""}]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [{"type": "command", "command": "node \"${CLAUDE_PROJECT_DIR:-$PWD}/node_modules/scope-guard/dist/hook-post.js\""}]
       }
     ]
   }
@@ -84,7 +88,7 @@ EOF
 
 # Copy SKILL.md
 mkdir -p .claude/skills/scope-guard
-cp SKILL.md .claude/skills/scope-guard/
+cp ./node_modules/scope-guard/skills/scope-guard/SKILL.md .claude/skills/scope-guard/
 ```
 </details>
 
@@ -92,7 +96,7 @@ Or install the SKILL.md only (prompt-level, no code hook):
 
 ```bash
 mkdir -p .claude/skills/scope-guard
-cp SKILL.md .claude/skills/scope-guard/
+cp ./node_modules/scope-guard/skills/scope-guard/SKILL.md .claude/skills/scope-guard/
 ```
 
 ## What happens in practice
@@ -117,7 +121,7 @@ You: "Delete the old migration files and push"
 
 ## Built-in risk rules
 
-14 rules covering common dangerous operations:
+38 rules covering common dangerous operations:
 
 | Risk | Operations |
 |------|-----------|
@@ -187,7 +191,7 @@ A [JSON Schema](scope-boundary.schema.json) is provided for editor autocompletio
 1. **Invisible when possible.** Low-risk, in-scope work proceeds without interruption.
 2. **Code enforces, not prompts.** Risk rules run as a Node.js hook — deterministic, not LLM-dependent.
 3. **Scope only expands with consent.** The agent cannot unilaterally broaden its own scope.
-4. **Fail closed.** On any error — bad input, missing config, internal crash — the verdict is BLOCK.
+4. **Fail closed.** On bad input, missing or invalid scope boundary, or internal crash, the verdict is BLOCK.
 
 ## Contributing
 
