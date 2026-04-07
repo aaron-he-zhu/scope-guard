@@ -1632,8 +1632,8 @@ describe("policy enforcement", () => {
 describe("package metadata", () => {
   it("maps the primary scope-guard bin to the CLI entrypoint", () => {
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf-8"));
-    assert.equal(pkg.bin["scope-guard"], "./dist/cli.js");
-    assert.equal(pkg.bin["scope-guard-hook"], "./dist/hook.js");
+    assert.equal(pkg.bin["scope-guard"], "dist/cli.js");
+    assert.equal(pkg.bin["scope-guard-hook"], "dist/hook.js");
   });
 
   it("points package metadata at the scope-guard repository", () => {
@@ -1643,7 +1643,7 @@ describe("package metadata", () => {
     const hooks = JSON.parse(readFileSync(join(import.meta.dirname, "..", "hooks", "hooks.json"), "utf-8"));
     const readme = readFileSync(join(import.meta.dirname, "..", "README.md"), "utf-8");
     const skill = readFileSync(join(import.meta.dirname, "..", "skills", "scope-guard", "SKILL.md"), "utf-8");
-    assert.equal(pkg.repository.url, "https://github.com/aaron-he-zhu/scope-guard.git");
+    assert.equal(pkg.repository.url, "git+https://github.com/aaron-he-zhu/scope-guard.git");
     assert.equal(pkg.homepage, "https://github.com/aaron-he-zhu/scope-guard");
     assert.equal(pkg.bugs.url, "https://github.com/aaron-he-zhu/scope-guard/issues");
     assert.equal(plugin.repository, "https://github.com/aaron-he-zhu/scope-guard");
