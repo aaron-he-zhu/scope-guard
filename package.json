@@ -28,12 +28,17 @@
   },
   "keywords": [
     "scope-guard",
-    "safety",
+    "ai-safety",
+    "ai-agent",
     "guardrail",
     "risk",
     "approval-gate",
+    "scope-drift",
+    "boundary-enforcement",
     "openclaw",
-    "claude-code"
+    "claude-code",
+    "agent-safety",
+    "pre-tool-hook"
   ],
   "author": "aaron-he-zhu",
   "license": "MIT",

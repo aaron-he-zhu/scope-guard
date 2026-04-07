@@ -375,6 +375,46 @@ describe("AuditLog", () => {
     const log = AuditLog.default();
     assert.ok(log.path.endsWith(".claude/scope-guard-audit.jsonl"));
   });
+
+  it("record includes HMAC signature", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({ verdict: CheckVerdict.ALLOW, tool: "Read", target: "f.ts", reason: "ok", risk_level: RiskLevel.LOW, scope_violation: false });
+    const entries = log.read();
+    assert.equal(entries.length, 1);
+    assert.ok(entries[0].hmac, "entry should have hmac field");
+    assert.equal(typeof entries[0].hmac, "string");
+    assert.equal(entries[0].hmac!.length, 64); // SHA-256 hex
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("verify passes for untampered entries", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({ verdict: CheckVerdict.ALLOW, tool: "Read", target: "", reason: "", risk_level: RiskLevel.LOW, scope_violation: false });
+    log.record({ verdict: CheckVerdict.BLOCK, tool: "Bash", target: "rm", reason: "", risk_level: RiskLevel.HIGH, scope_violation: false });
+    const result = log.verify();
+    assert.equal(result.valid, 2);
+    assert.equal(result.tampered, 0);
+    assert.equal(result.unsigned, 0);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("verify detects tampered entries", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({ verdict: CheckVerdict.ALLOW, tool: "Read", target: "", reason: "", risk_level: RiskLevel.LOW, scope_violation: false });
+    // Tamper with the file
+    const content = readFileSync(p, "utf-8");
+    writeFileSync(p, content.replace('"allow"', '"block"'));
+    const result = log.verify();
+    assert.equal(result.tampered, 1);
+    assert.equal(result.valid, 0);
+    rmSync(tmp, { recursive: true });
+  });
 });
 
 // ---------------------------------------------------------------------------

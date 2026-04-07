@@ -5,4 +5,5 @@ package-lock.json
 .pytest_cache/
 .claude/scope-boundary.json
 .claude/scope-guard-audit.jsonl
+.claude/scope-guard-audit.jsonl.key
 .claude/scope-guard-rules.yaml

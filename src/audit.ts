@@ -1,9 +1,10 @@
 /**
- * Lightweight audit log for scope-guard decisions.
+ * Lightweight audit log for scope-guard decisions with HMAC integrity signing.
  */
 
 import { appendFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
+import { createHmac, randomBytes } from "node:crypto";
 import type { CheckResult } from "./checker.js";
 
 export interface AuditEntry {
@@ -14,6 +15,25 @@ export interface AuditEntry {
   risk_level: string;
   scope_violation: boolean;
   reason: string;
+  hmac?: string;
+}
+
+/** Generate or load an HMAC key for audit signing. */
+function getHmacKey(logPath: string): string {
+  const keyPath = logPath + ".key";
+  if (existsSync(keyPath)) {
+    return readFileSync(keyPath, "utf-8").trim();
+  }
+  const key = randomBytes(32).toString("hex");
+  mkdirSync(dirname(keyPath), { recursive: true });
+  appendFileSync(keyPath, key + "\n");
+  return key;
+}
+
+/** Compute HMAC-SHA256 for an audit entry (excluding the hmac field). */
+function computeHmac(entry: Omit<AuditEntry, "hmac">, key: string): string {
+  const payload = JSON.stringify(entry);
+  return createHmac("sha256", key).update(payload).digest("hex");
 }
 
 export class AuditLog {
@@ -24,7 +44,7 @@ export class AuditLog {
   }
 
   record(result: CheckResult): void {
-    const entry: AuditEntry = {
+    const entry: Omit<AuditEntry, "hmac"> = {
       timestamp: new Date().toISOString(),
       tool: result.tool,
       target: result.target,
@@ -34,7 +54,9 @@ export class AuditLog {
       reason: result.reason,
     };
     mkdirSync(dirname(this.path), { recursive: true });
-    appendFileSync(this.path, JSON.stringify(entry) + "\n");
+    const key = getHmacKey(this.path);
+    const signed: AuditEntry = { ...entry, hmac: computeHmac(entry, key) };
+    appendFileSync(this.path, JSON.stringify(signed) + "\n");
   }
 
   read(limit = 50): AuditEntry[] {
@@ -49,6 +71,28 @@ export class AuditLog {
       }
     }
     return entries.slice(-limit);
+  }
+
+  /** Verify HMAC integrity of all audit entries. */
+  verify(): { valid: number; tampered: number; unsigned: number } {
+    const entries = this.read(50_000);
+    const keyPath = this.path + ".key";
+    if (!existsSync(keyPath)) return { valid: 0, tampered: 0, unsigned: entries.length };
+    const key = readFileSync(keyPath, "utf-8").trim();
+    let valid = 0;
+    let tampered = 0;
+    let unsigned = 0;
+    for (const entry of entries) {
+      if (!entry.hmac) {
+        unsigned++;
+        continue;
+      }
+      const { hmac, ...rest } = entry;
+      const expected = computeHmac(rest, key);
+      if (hmac === expected) valid++;
+      else tampered++;
+    }
+    return { valid, tampered, unsigned };
   }
 
   summary(): { total: number; verdicts?: Record<string, number>; scope_violations?: number } {

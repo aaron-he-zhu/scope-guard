@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/aaron-he-zhu/preflight-scope/scope-boundary.schema.json",
+  "title": "Scope Boundary",
+  "description": "Defines the files, directories, assumptions, and risk level for an AI agent task.",
+  "type": "object",
+  "properties": {
+    "files_in_scope": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Files the agent may read or modify."
+    },
+    "dirs_in_scope": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Directories where all files are in scope."
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "The assumption." },
+          "verified": { "type": "boolean", "description": "Whether this was verified." },
+          "verification_method": { "type": "string", "description": "How it was verified." }
+        },
+        "required": ["text", "verified"]
+      },
+      "description": "Assumptions made about the task."
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Overall risk level of the task."
+    },
+    "approval_required": {
+      "type": "boolean",
+      "description": "Whether explicit user approval is needed before proceeding."
+    },
+    "task_summary": {
+      "type": "string",
+      "description": "Brief description of the task."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the scope boundary was created."
+    },
+    "revisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "reason": { "type": "string" },
+          "added_files": { "type": "array", "items": { "type": "string" } },
+          "added_dirs": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["action", "timestamp", "reason", "added_files", "added_dirs"]
+      },
+      "description": "History of scope expansions."
+    }
+  },
+  "required": ["files_in_scope", "dirs_in_scope", "risk_level", "task_summary"]
+}
