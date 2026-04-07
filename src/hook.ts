@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
- * Scope Guard — CLI hook entry point.
+ * Scope Guard v2 — CLI hook entry point.
  *
  * Reads a tool call as JSON from stdin, runs the scope checker,
  * prints the verdict as JSON to stdout, and exits with:
- *   0 = allow, 1 = warn, 2 = block
+ *   0 = allow, 1 = warn, 2 = escalate, 3 = block
+ *
+ * Set SCOPE_GUARD_LEGACY_EXIT_CODES=1 to use v1 codes (0/1/2 without escalate).
  *
  * Usage (Claude Code hooks):
  *   "command": "node dist/hook.js"
@@ -17,7 +19,11 @@ import { RiskEngine } from "./risk.js";
 import { ScopeBoundary } from "./scope.js";
 import { AuditLog } from "./audit.js";
 
-const EXIT_CODES: Record<string, number> = { allow: 0, warn: 1, block: 2 };
+const LEGACY = !!process.env.SCOPE_GUARD_LEGACY_EXIT_CODES;
+
+const EXIT_CODES: Record<string, number> = LEGACY
+  ? { allow: 0, warn: 1, escalate: 2, block: 2 }
+  : { allow: 0, warn: 1, escalate: 2, block: 3 };
 
 function main(): void {
   let raw: string;
@@ -26,24 +32,23 @@ function main(): void {
   } catch {
     // No stdin — fail closed
     console.log(JSON.stringify({ verdict: "block", reason: "no input" }));
-    process.exit(2);
-    return; // unreachable, helps TS
+    process.exit(LEGACY ? 2 : 3);
+    return;
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    // Unparsable input — fail closed
     console.log(JSON.stringify({ verdict: "block", reason: "unparsable input" }));
-    process.exit(2);
-    return; // unreachable, helps TS
+    process.exit(LEGACY ? 2 : 3);
+    return;
   }
 
-  // Validate payload is a non-null object (#1 null payload)
+  // Validate payload is a non-null object
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     console.log(JSON.stringify({ verdict: "block", reason: "payload must be a JSON object" }));
-    process.exit(2);
+    process.exit(LEGACY ? 2 : 3);
     return;
   }
 
@@ -79,7 +84,7 @@ function main(): void {
   }
 
   console.log(JSON.stringify(result));
-  process.exit(EXIT_CODES[result.verdict] ?? 2);
+  process.exit(EXIT_CODES[result.verdict] ?? (LEGACY ? 2 : 3));
 }
 
 main();

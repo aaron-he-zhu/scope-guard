@@ -9,11 +9,16 @@
     "./checker": "./dist/checker.js",
     "./risk": "./dist/risk.js",
     "./scope": "./dist/scope.js",
-    "./audit": "./dist/audit.js"
+    "./audit": "./dist/audit.js",
+    "./content": "./dist/content.js",
+    "./policy": "./dist/policy.js",
+    "./output-filter": "./dist/output-filter.js"
   },
   "bin": {
     "scope-guard": "./dist/hook.js",
-    "scope-guard-init": "./dist/init.js"
+    "scope-guard-init": "./dist/init.js",
+    "scope-guard-cli": "./dist/cli.js",
+    "scope-guard-post": "./dist/hook-post.js"
   },
   "openclaw": {
     "extensions": ["./dist/index.js"],

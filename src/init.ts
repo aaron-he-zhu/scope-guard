@@ -12,11 +12,15 @@ import { join, dirname } from "node:path";
 function main(): void {
   const cwd = process.cwd();
 
-  // 1. Set up hook in .claude/settings.json
+  // 1. Set up hooks in .claude/settings.json
   const settingsPath = join(cwd, ".claude", "settings.json");
-  const hookEntry = {
+  const preHookEntry = {
     matcher: "",
     hooks: [{ type: "command", command: "node dist/hook.js" }],
+  };
+  const postHookEntry = {
+    matcher: "",
+    hooks: [{ type: "command", command: "node dist/hook-post.js" }],
   };
 
   let settings: Record<string, unknown> = {};
@@ -31,24 +35,36 @@ function main(): void {
   // Merge hooks — don't overwrite existing hooks
   const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
   const preToolUse = (hooks.PreToolUse ?? []) as Record<string, unknown>[];
+  const postToolUse = (hooks.PostToolUse ?? []) as Record<string, unknown>[];
 
-  // Check if scope-guard hook already exists
-  const alreadyInstalled = preToolUse.some(
-    (h) => Array.isArray(h.hooks) && h.hooks.some(
-      (hh: Record<string, unknown>) => typeof hh.command === "string" && (hh.command as string).includes("hook.js"),
-    ),
-  );
+  const hookContains = (arr: Record<string, unknown>[], file: string) =>
+    arr.some(
+      (h) => Array.isArray(h.hooks) && h.hooks.some(
+        (hh: Record<string, unknown>) => typeof hh.command === "string" && (hh.command as string).includes(file),
+      ),
+    );
 
-  if (alreadyInstalled) {
-    console.log("[scope-guard] hook already installed in .claude/settings.json");
+  // PreToolUse hook
+  if (hookContains(preToolUse, "hook.js")) {
+    console.log("[scope-guard] PreToolUse hook already installed");
   } else {
-    preToolUse.push(hookEntry);
+    preToolUse.push(preHookEntry);
     hooks.PreToolUse = preToolUse;
-    settings.hooks = hooks;
-    mkdirSync(dirname(settingsPath), { recursive: true });
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
-    console.log("[scope-guard] added PreToolUse hook to .claude/settings.json");
+    console.log("[scope-guard] added PreToolUse hook");
   }
+
+  // PostToolUse hook
+  if (hookContains(postToolUse, "hook-post.js")) {
+    console.log("[scope-guard] PostToolUse hook already installed");
+  } else {
+    postToolUse.push(postHookEntry);
+    hooks.PostToolUse = postToolUse;
+    console.log("[scope-guard] added PostToolUse hook");
+  }
+
+  settings.hooks = hooks;
+  mkdirSync(dirname(settingsPath), { recursive: true });
+  writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 
   // 2. Copy SKILL.md if available
   const skillDest = join(cwd, ".claude", "skills", "scope-guard", "SKILL.md");

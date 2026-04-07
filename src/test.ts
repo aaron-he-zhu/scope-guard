@@ -13,6 +13,9 @@ import { RiskLevel, RiskRule, RiskEngine, builtinRules, riskOrd } from "./risk.j
 import { ScopeBoundary, normalisePath } from "./scope.js";
 import { ScopeChecker, CheckVerdict } from "./checker.js";
 import { AuditLog } from "./audit.js";
+import { ContentScanner } from "./content.js";
+import { loadPolicy, buildRiskEngine, validatePolicy, type PolicyConfig } from "./policy.js";
+import { OutputFilter } from "./output-filter.js";
 
 // ---------------------------------------------------------------------------
 // Risk
@@ -94,7 +97,21 @@ describe("RiskEngine", () => {
   it("head .env is HIGH (secret_files rule)", () => assert.equal(engine.assess("Bash", { command: "head .env" }), RiskLevel.HIGH));
   it("cat safe file is LOW", () => assert.equal(engine.assess("Bash", { command: "cat README.md" }), RiskLevel.LOW));
 
-  it("builtin rules count is 14", () => assert.equal(builtinRules().length, 14));
+  it("builtin rules count is 19", () => assert.equal(builtinRules().length, 19));
+
+  // v2 SQL mutation rules
+  it("INSERT INTO is HIGH", () => assert.equal(engine.assess("Bash", { command: "INSERT INTO users VALUES (1)" }), RiskLevel.HIGH));
+  it("UPDATE SET is HIGH", () => assert.equal(engine.assess("Bash", { command: "UPDATE users SET name='x'" }), RiskLevel.HIGH));
+  it("DELETE FROM is HIGH", () => assert.equal(engine.assess("Bash", { command: "DELETE FROM users WHERE id=1" }), RiskLevel.HIGH));
+  it("ALTER TABLE is HIGH", () => assert.equal(engine.assess("Bash", { command: "ALTER TABLE users ADD col int" }), RiskLevel.HIGH));
+  it("MERGE INTO is HIGH", () => assert.equal(engine.assess("Bash", { command: "MERGE INTO t USING s ON ..." }), RiskLevel.HIGH));
+  it("CREATE OR REPLACE is HIGH", () => assert.equal(engine.assess("Bash", { command: "CREATE OR REPLACE TABLE t AS SELECT 1" }), RiskLevel.HIGH));
+  it("COPY INTO is HIGH", () => assert.equal(engine.assess("Bash", { command: "COPY INTO @stage FROM t" }), RiskLevel.HIGH));
+
+  // v2 messaging rules
+  it("send_message is MEDIUM", () => assert.equal(engine.assess("mcp__slack__send_message", { text: "hi" }), RiskLevel.MEDIUM));
+  it("broadcast is HIGH", () => assert.equal(engine.assess("mcp__slack__broadcast", { text: "hi" }), RiskLevel.HIGH));
+  it("publish is HIGH", () => assert.equal(engine.assess("mcp__hubspot__publish", { id: "1" }), RiskLevel.HIGH));
 
   it("matchingRules returns applicable rules", () => {
     const rules = engine.matchingRules("Bash", { command: "curl -X POST http://api" });
@@ -278,10 +295,10 @@ describe("ScopeChecker", () => {
     assert.equal(c.check("Bash", { command: "rm -rf /" }).verdict, CheckVerdict.BLOCK);
   });
 
-  it("unknown tool falls back to risk-only", () => {
+  it("unknown tool is WARN for safety", () => {
     const c = new ScopeChecker(new ScopeBoundary());
     const r = c.check("SomeNewTool", { file_path: "foo.ts" });
-    assert.equal(r.verdict, CheckVerdict.ALLOW);
+    assert.equal(r.verdict, CheckVerdict.WARN);
     assert.equal(r.scope_violation, false);
   });
 
@@ -399,6 +416,7 @@ describe("AuditLog", () => {
     assert.equal(result.valid, 2);
     assert.equal(result.tampered, 0);
     assert.equal(result.unsigned, 0);
+    assert.equal(result.chain_breaks, 0);
     rmSync(tmp, { recursive: true });
   });
 
@@ -415,6 +433,86 @@ describe("AuditLog", () => {
     assert.equal(result.valid, 0);
     rmSync(tmp, { recursive: true });
   });
+
+  it("hash chain links entries", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({ verdict: CheckVerdict.ALLOW, tool: "Read", target: "", reason: "", risk_level: RiskLevel.LOW, scope_violation: false });
+    log.record({ verdict: CheckVerdict.WARN, tool: "Bash", target: "", reason: "", risk_level: RiskLevel.MEDIUM, scope_violation: false });
+    log.record({ verdict: CheckVerdict.BLOCK, tool: "Bash", target: "", reason: "", risk_level: RiskLevel.HIGH, scope_violation: false });
+    const entries = log.read();
+    assert.equal(entries.length, 3);
+    assert.equal(entries[0].prev_hash, undefined); // first entry has no prev
+    assert.ok(entries[1].prev_hash, "second entry should have prev_hash");
+    assert.ok(entries[2].prev_hash, "third entry should have prev_hash");
+    assert.notEqual(entries[1].prev_hash, entries[2].prev_hash);
+    const result = log.verify();
+    assert.equal(result.chain_breaks, 0);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("session_id and user_id from env", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    const origSession = process.env.SCOPE_GUARD_SESSION_ID;
+    const origUser = process.env.SCOPE_GUARD_USER_ID;
+    process.env.SCOPE_GUARD_SESSION_ID = "test-session-123";
+    process.env.SCOPE_GUARD_USER_ID = "user@example.com";
+    try {
+      log.record({ verdict: CheckVerdict.ALLOW, tool: "Read", target: "", reason: "", risk_level: RiskLevel.LOW, scope_violation: false });
+      const entries = log.read();
+      assert.equal(entries[0].session_id, "test-session-123");
+      assert.equal(entries[0].user_id, "user@example.com");
+    } finally {
+      if (origSession === undefined) delete process.env.SCOPE_GUARD_SESSION_ID;
+      else process.env.SCOPE_GUARD_SESSION_ID = origSession;
+      if (origUser === undefined) delete process.env.SCOPE_GUARD_USER_ID;
+      else process.env.SCOPE_GUARD_USER_ID = origUser;
+    }
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("HMAC key from env var takes precedence", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    const origKey = process.env.SCOPE_GUARD_HMAC_KEY;
+    process.env.SCOPE_GUARD_HMAC_KEY = "a]".repeat(16); // 32 chars, valid
+    try {
+      log.record({ verdict: CheckVerdict.ALLOW, tool: "Read", target: "", reason: "", risk_level: RiskLevel.LOW, scope_violation: false });
+      const result = log.verify();
+      assert.equal(result.valid, 1);
+      assert.equal(result.tampered, 0);
+    } finally {
+      if (origKey === undefined) delete process.env.SCOPE_GUARD_HMAC_KEY;
+      else process.env.SCOPE_GUARD_HMAC_KEY = origKey;
+    }
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("escalation_reason and content_flags in audit entry", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({
+      verdict: CheckVerdict.ESCALATE,
+      tool: "Read",
+      target: "lawsuit.md",
+      reason: "escalation keyword",
+      risk_level: RiskLevel.HIGH,
+      scope_violation: false,
+      escalation_reason: "Contains lawsuit keyword",
+      content_flags: ["ssn", "credit_card"],
+      matched_rules: ["messaging_broadcast"],
+    });
+    const entries = log.read();
+    assert.equal(entries[0].escalation_reason, "Contains lawsuit keyword");
+    assert.deepEqual(entries[0].content_flags, ["ssn", "credit_card"]);
+    assert.deepEqual(entries[0].matched_rules, ["messaging_broadcast"]);
+    rmSync(tmp, { recursive: true });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -424,14 +522,23 @@ describe("AuditLog", () => {
 describe("hook.ts integration", () => {
   const hookPath = join(import.meta.dirname, "..", "dist", "hook.js");
 
-  function runHook(input: string): { stdout: string; exitCode: number } {
+  function runHook(
+    input: string,
+    scopeConfig?: Record<string, unknown>,
+  ): { stdout: string; exitCode: number } {
+    const cwd = mkdtempSync(join(tmpdir(), "sg-hook-"));
+    if (scopeConfig) {
+      const claudeDir = join(cwd, ".claude");
+      mkdirSync(claudeDir, { recursive: true });
+      writeFileSync(join(claudeDir, "scope-boundary.json"), JSON.stringify(scopeConfig));
+    }
     try {
       const stdout = execFileSync("node", [hookPath], {
         input,
         encoding: "utf-8",
         timeout: 5000,
         env: { ...process.env, HOME: tmpdir() },
-        cwd: mkdtempSync(join(tmpdir(), "sg-hook-")),
+        cwd,
       });
       return { stdout: stdout.trim(), exitCode: 0 };
     } catch (e: unknown) {
@@ -449,7 +556,7 @@ describe("hook.ts integration", () => {
 
   it("block on rm -rf", () => {
     const { stdout, exitCode } = runHook(JSON.stringify({ tool_name: "Bash", tool_input: { command: "rm -rf /" } }));
-    assert.equal(exitCode, 2);
+    assert.equal(exitCode, 3);
     const result = JSON.parse(stdout);
     assert.equal(result.verdict, "block");
   });
@@ -463,28 +570,28 @@ describe("hook.ts integration", () => {
 
   it("block on empty stdin", () => {
     const { stdout, exitCode } = runHook("");
-    assert.equal(exitCode, 2);
+    assert.equal(exitCode, 3);
     const result = JSON.parse(stdout);
     assert.equal(result.verdict, "block");
   });
 
   it("block on malformed JSON", () => {
     const { stdout, exitCode } = runHook("{not json}");
-    assert.equal(exitCode, 2);
+    assert.equal(exitCode, 3);
     const result = JSON.parse(stdout);
     assert.equal(result.verdict, "block");
   });
 
   it("block on null payload", () => {
     const { stdout, exitCode } = runHook("null");
-    assert.equal(exitCode, 2);
+    assert.equal(exitCode, 3);
     const result = JSON.parse(stdout);
     assert.equal(result.verdict, "block");
   });
 
   it("block on array payload", () => {
     const { stdout, exitCode } = runHook("[]");
-    assert.equal(exitCode, 2);
+    assert.equal(exitCode, 3);
     const result = JSON.parse(stdout);
     assert.equal(result.verdict, "block");
   });
@@ -508,6 +615,16 @@ describe("hook.ts integration", () => {
     assert.equal(exitCode, 1);
     const result = JSON.parse(stdout);
     assert.equal(result.verdict, "warn");
+  });
+
+  it("hook exit code for escalate is 2", () => {
+    const { stdout, exitCode } = runHook(
+      JSON.stringify({ tool_name: "Read", tool_input: { file_path: "lawsuit-doc.md" } }),
+      { resources: { escalation_keywords: ["lawsuit"] } },
+    );
+    assert.equal(exitCode, 2);
+    const result = JSON.parse(stdout);
+    assert.equal(result.verdict, "escalate");
   });
 });
 
@@ -722,10 +839,10 @@ describe("command truncation", () => {
     assert.equal(r.target.length, 500);
   });
 
-  it("truncates at 500 chars in extractTarget", () => {
+  it("truncates at 500 chars in extractTarget via MCP", () => {
     const checker = new ScopeChecker(new ScopeBoundary());
     const longUrl = "http://" + "x".repeat(1000);
-    const r = checker.check("SomeNewTool", { url: longUrl });
+    const r = checker.check("mcp__test__get_data", { url: longUrl });
     assert.equal(r.target.length, 500);
   });
 
@@ -733,5 +850,401 @@ describe("command truncation", () => {
     const checker = new ScopeChecker(new ScopeBoundary());
     const r = checker.check("Bash", { command: "echo hello" });
     assert.equal(r.target, "echo hello");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2: MCP tool classification
+// ---------------------------------------------------------------------------
+
+describe("MCP tool classification", () => {
+  const checker = new ScopeChecker(new ScopeBoundary());
+
+  it("MCP write tool is WARN", () => {
+    const r = checker.check("mcp__hubspot__update_deal", { deal_id: "123" });
+    assert.equal(r.verdict, CheckVerdict.WARN);
+  });
+
+  it("MCP read tool is ALLOW", () => {
+    const r = checker.check("mcp__hubspot__get_deal", { deal_id: "123" });
+    assert.equal(r.verdict, CheckVerdict.ALLOW);
+  });
+
+  it("MCP delete is WARN", () => {
+    const r = checker.check("mcp__jira__delete_issue", { issue_id: "X-1" });
+    assert.equal(r.verdict, CheckVerdict.WARN);
+  });
+
+  it("MCP send_message is WARN (messaging_single rule makes MEDIUM)", () => {
+    const r = checker.check("mcp__slack__send_message", { text: "hi" });
+    assert.equal(r.verdict, CheckVerdict.WARN);
+  });
+
+  it("MCP broadcast is BLOCK (messaging_broadcast + write verb)", () => {
+    const r = checker.check("mcp__slack__broadcast", { text: "hi" });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+  });
+
+  it("MCP publish is BLOCK (publish_schedule HIGH)", () => {
+    const r = checker.check("mcp__hubspot__publish", { post_id: "1" });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+  });
+
+  it("MCP schedule is WARN (write verb, no matching rule for MEDIUM+)", () => {
+    const r = checker.check("mcp__calendar__schedule", { event: "test" });
+    assert.equal(r.verdict, CheckVerdict.WARN);
+  });
+
+  it("MCP start_run is WARN (write verb)", () => {
+    const r = checker.check("mcp__benchling__start_run", { protocol: "p1" });
+    assert.equal(r.verdict, CheckVerdict.WARN);
+  });
+
+  it("MCP with SQL mutation in params is BLOCK", () => {
+    const r = checker.check("mcp__snowflake__execute", { sql: "DELETE FROM users WHERE 1=1" });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+  });
+
+  it("MCP with secret in params is BLOCK", () => {
+    const r = checker.check("mcp__hubspot__get_contacts", { file_path: ".env" });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+  });
+});
+
+describe("MCP org boundary", () => {
+  it("allowed server passes", () => {
+    const b = new ScopeBoundary({ org_boundary: { allowed_mcp_servers: ["hubspot", "jira"] } });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__hubspot__get_deal", {});
+    assert.equal(r.verdict, CheckVerdict.ALLOW);
+  });
+
+  it("blocked server is BLOCK", () => {
+    const b = new ScopeBoundary({ org_boundary: { blocked_mcp_servers: ["slack"] } });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__slack__send_message", { text: "hi" });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+    assert.equal(r.scope_violation, true);
+  });
+
+  it("server not in allowed list is BLOCK", () => {
+    const b = new ScopeBoundary({ org_boundary: { allowed_mcp_servers: ["hubspot"] } });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__slack__get_messages", {});
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+  });
+
+  it("no org boundary means all servers allowed", () => {
+    const b = new ScopeBoundary();
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__anything__get_data", {});
+    assert.equal(r.verdict, CheckVerdict.ALLOW);
+  });
+});
+
+describe("Resource scoping", () => {
+  it("allowed resource passes", () => {
+    const b = new ScopeBoundary({ resources: { allowed_resources: ["snowflake:analytics:*"] } });
+    assert.equal(b.isResourceAllowed("snowflake:analytics:events"), "allowed");
+  });
+
+  it("blocked resource is blocked", () => {
+    const b = new ScopeBoundary({ resources: { blocked_resources: ["snowflake:production:*"] } });
+    assert.equal(b.isResourceAllowed("snowflake:production:users"), "blocked");
+  });
+
+  it("protected resource is protected", () => {
+    const b = new ScopeBoundary({ resources: { protected_resources: ["*:gl_*"] } });
+    assert.equal(b.isResourceAllowed("snowflake:gl_journal_entries"), "protected");
+  });
+
+  it("resource not in allowed list is blocked", () => {
+    const b = new ScopeBoundary({ resources: { allowed_resources: ["hubspot:deals:*"] } });
+    assert.equal(b.isResourceAllowed("hubspot:contacts:list"), "blocked");
+  });
+
+  it("no resource config means all allowed", () => {
+    const b = new ScopeBoundary();
+    assert.equal(b.isResourceAllowed("anything:here"), "allowed");
+  });
+
+  it("glob ** matches remaining", () => {
+    const b = new ScopeBoundary({ resources: { allowed_resources: ["snowflake:**"] } });
+    assert.equal(b.isResourceAllowed("snowflake:analytics:events"), "allowed");
+  });
+});
+
+describe("Escalation keywords", () => {
+  it("escalation keyword in Read target triggers ESCALATE", () => {
+    const b = new ScopeBoundary({ resources: { escalation_keywords: ["lawsuit", "chargeback"] } });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("Read", { file_path: "docs/lawsuit-response.md" });
+    assert.equal(r.verdict, CheckVerdict.ESCALATE);
+    assert.ok(r.escalation_reason);
+  });
+
+  it("escalation keyword in MCP params triggers ESCALATE", () => {
+    const b = new ScopeBoundary({ resources: { escalation_keywords: ["lawsuit"] } });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__intercom__get_conversation", { query: "customer lawsuit threat" });
+    assert.equal(r.verdict, CheckVerdict.ESCALATE);
+  });
+
+  it("blocked keyword in MCP params triggers WARN", () => {
+    const b = new ScopeBoundary({ resources: { blocked_keywords: ["confidential"] } });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__notion__search", { query: "confidential roadmap" });
+    assert.equal(r.verdict, CheckVerdict.WARN);
+  });
+
+  it("no keywords = no escalation", () => {
+    const b = new ScopeBoundary();
+    const checker = new ScopeChecker(b);
+    const r = checker.check("Read", { file_path: "normal-file.ts" });
+    assert.equal(r.verdict, CheckVerdict.ALLOW);
+  });
+});
+
+describe("Protected resources on Read", () => {
+  it("Read of protected resource is BLOCK", () => {
+    const b = new ScopeBoundary({ resources: { protected_resources: ["*privileged*"] } });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("Read", { file_path: "docs/privileged-memo.pdf" });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+    assert.equal(r.scope_violation, true);
+  });
+});
+
+describe("expandScope gate", () => {
+  it("expand_requires_reason blocks empty reason", () => {
+    const b = new ScopeBoundary({ files_in_scope: ["a.ts"], expand_requires_reason: true });
+    assert.throws(() => b.expandScope(["b.ts"], undefined, ""), /non-empty reason/);
+  });
+
+  it("expand_requires_reason allows with reason", () => {
+    const b = new ScopeBoundary({ files_in_scope: ["a.ts"], expand_requires_reason: true });
+    b.expandScope(["b.ts"], undefined, "user requested");
+    assert.equal(b.files_in_scope.length, 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2: Content Scanner
+// ---------------------------------------------------------------------------
+
+describe("ContentScanner", () => {
+  const scanner = new ContentScanner();
+
+  it("detects SSN pattern", () => {
+    const r = scanner.scan("SSN is 123-45-6789");
+    assert.ok(r.flags.some(f => f.pattern_name === "ssn"));
+    assert.equal(r.highest_risk, RiskLevel.HIGH);
+  });
+
+  it("detects credit card", () => {
+    const r = scanner.scan("card: 4111 1111 1111 1111");
+    assert.ok(r.flags.some(f => f.pattern_name === "credit_card"));
+  });
+
+  it("detects MRN", () => {
+    const r = scanner.scan("MRN: 123456");
+    assert.ok(r.flags.some(f => f.pattern_name === "mrn"));
+  });
+
+  it("detects API key assignment", () => {
+    const r = scanner.scan("api_key=sk_live_abc123def456");
+    assert.ok(r.flags.some(f => f.pattern_name === "api_key_assign"));
+  });
+
+  it("detects bearer token", () => {
+    const r = scanner.scan("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test");
+    assert.ok(r.flags.some(f => f.pattern_name === "bearer_token"));
+  });
+
+  it("detects large base64 blob", () => {
+    const r = scanner.scan("data: " + "A".repeat(250));
+    assert.ok(r.flags.some(f => f.pattern_name === "base64_large"));
+  });
+
+  it("normal code returns no flags", () => {
+    const r = scanner.scan("const x = 42; function foo() { return x; }");
+    assert.equal(r.flags.length, 0);
+    assert.equal(r.highest_risk, RiskLevel.LOW);
+  });
+
+  it("empty string returns no flags", () => {
+    const r = scanner.scan("");
+    assert.equal(r.flags.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2: 4-verdict model
+// ---------------------------------------------------------------------------
+
+describe("4-verdict model", () => {
+  it("ESCALATE is a valid verdict", () => {
+    assert.equal(CheckVerdict.ESCALATE, "escalate");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2: Policy engine
+// ---------------------------------------------------------------------------
+
+describe("PolicyConfig", () => {
+  it("loadPolicy returns empty for missing file", () => {
+    const config = loadPolicy("/nonexistent/policy.json");
+    assert.deepEqual(config, {});
+  });
+
+  it("loadPolicy loads a basic policy", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-policy-"));
+    const p = join(tmp, "policy.json");
+    const policy: PolicyConfig = {
+      compliance_mode: "hipaa",
+      blocked_tools: ["WebFetch"],
+    };
+    writeFileSync(p, JSON.stringify(policy));
+    const loaded = loadPolicy(p);
+    assert.equal(loaded.compliance_mode, "hipaa");
+    assert.ok(loaded.blocked_tools?.includes("WebFetch"));
+    // HIPAA preset adds extra rules
+    assert.ok(loaded.extra_rules && loaded.extra_rules.length > 0);
+    assert.equal(loaded.require_scope_boundary, true);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("extends chain merges policies", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-policy-"));
+    const basePath = join(tmp, "base.json");
+    const childPath = join(tmp, "child.json");
+    writeFileSync(basePath, JSON.stringify({
+      tool_overrides: { Write: "medium" },
+      blocked_tools: ["WebFetch"],
+    }));
+    writeFileSync(childPath, JSON.stringify({
+      extends: "base.json",
+      tool_overrides: { Write: "high" },
+      blocked_tools: ["Bash"],
+    }));
+    const loaded = loadPolicy(childPath);
+    // Most restrictive wins for tool_overrides
+    assert.equal(loaded.tool_overrides?.Write, "high");
+    // Union for blocked_tools
+    assert.ok(loaded.blocked_tools?.includes("WebFetch"));
+    assert.ok(loaded.blocked_tools?.includes("Bash"));
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("extends depth limit throws", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-policy-"));
+    // Create a chain of 7 files, each extending the next
+    for (let i = 0; i < 7; i++) {
+      const p = join(tmp, `p${i}.json`);
+      writeFileSync(p, JSON.stringify({ extends: `p${i + 1}.json` }));
+    }
+    writeFileSync(join(tmp, "p7.json"), JSON.stringify({}));
+    assert.throws(() => loadPolicy(join(tmp, "p0.json")), /max depth/);
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("buildRiskEngine includes extra rules", () => {
+    const engine = buildRiskEngine({
+      extra_rules: [
+        { name: "custom_test", tool: "Bash", pattern: "my_dangerous_cmd", risk: RiskLevel.HIGH },
+      ],
+    });
+    assert.equal(engine.assess("Bash", { command: "my_dangerous_cmd" }), RiskLevel.HIGH);
+  });
+
+  it("most-restrictive-wins for max_risk_auto_allow", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-policy-"));
+    const basePath = join(tmp, "base.json");
+    const childPath = join(tmp, "child.json");
+    writeFileSync(basePath, JSON.stringify({ max_risk_auto_allow: "medium" }));
+    writeFileSync(childPath, JSON.stringify({ extends: "base.json", max_risk_auto_allow: "low" }));
+    const loaded = loadPolicy(childPath);
+    assert.equal(loaded.max_risk_auto_allow, "low");
+    rmSync(tmp, { recursive: true });
+  });
+});
+
+describe("validatePolicy", () => {
+  it("valid policy passes", () => {
+    const result = validatePolicy({
+      compliance_mode: "hipaa",
+      extra_rules: [{ name: "test", tool: "*", pattern: "foo", risk: RiskLevel.HIGH }],
+    });
+    assert.equal(result.valid, true);
+    assert.equal(result.errors.length, 0);
+  });
+
+  it("invalid compliance_mode is error", () => {
+    const result = validatePolicy({ compliance_mode: "bogus" as any });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes("compliance_mode")));
+  });
+
+  it("invalid regex in extra_rules is error", () => {
+    const result = validatePolicy({
+      extra_rules: [{ name: "bad", tool: "*", pattern: "[invalid", risk: RiskLevel.HIGH }],
+    });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes("invalid regex")));
+  });
+
+  it("invalid risk level is error", () => {
+    const result = validatePolicy({
+      tool_overrides: { Bash: "extreme" as any },
+    });
+    assert.equal(result.valid, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2: Output filter
+// ---------------------------------------------------------------------------
+
+describe("OutputFilter", () => {
+  const filter = new OutputFilter();
+
+  it("clean output is not filtered", () => {
+    const r = filter.scan("Hello, world!");
+    assert.equal(r.filtered, false);
+    assert.equal(r.redacted_patterns.length, 0);
+    assert.equal(r.risk_level, RiskLevel.LOW);
+  });
+
+  it("SSN in output is detected", () => {
+    const r = filter.scan("Patient SSN: 123-45-6789");
+    assert.equal(r.filtered, true);
+    assert.ok(r.redacted_patterns.includes("ssn"));
+    assert.equal(r.risk_level, RiskLevel.HIGH);
+  });
+
+  it("redact replaces SSN", () => {
+    const { text, result } = filter.redact("Patient SSN: 123-45-6789");
+    assert.ok(text.includes("[REDACTED:ssn]"));
+    assert.ok(!text.includes("123-45-6789"));
+    assert.equal(result.filtered, true);
+  });
+
+  it("redact preserves clean text", () => {
+    const { text, result } = filter.redact("const x = 42;");
+    assert.equal(text, "const x = 42;");
+    assert.equal(result.filtered, false);
+  });
+
+  it("multiple patterns detected", () => {
+    const { text, result } = filter.redact("SSN: 123-45-6789, API key: api_key=sk_live_verylongkeymaterial");
+    assert.ok(result.redacted_patterns.includes("ssn"));
+    assert.ok(result.redacted_patterns.includes("api_key_assign"));
+    assert.ok(text.includes("[REDACTED:ssn]"));
+  });
+
+  it("bearer token redacted", () => {
+    const { text } = filter.redact("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test.sig");
+    assert.ok(text.includes("[REDACTED:bearer_token]"));
   });
 });

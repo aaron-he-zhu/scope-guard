@@ -50,7 +50,7 @@ export class RiskRule {
     if (this.tool !== "*" && this.tool.toLowerCase() !== toolName.toLowerCase()) {
       return false;
     }
-    return this.compiled.test(paramsStr);
+    return this.compiled.test(paramsStr) || this.compiled.test(toolName);
   }
 }
 
@@ -117,7 +117,7 @@ export function builtinRules(): RiskRule[] {
     new RiskRule({
       name: "drop_database",
       tool: "Bash",
-      pattern: "\\b(drop\\s+table|drop\\s+database|truncate\\s+table)\\b",
+      pattern: "\\b(drop\\s+(table|database|index|view|schema)|truncate\\s+table)\\b",
       risk: RiskLevel.HIGH,
       description: "Database destructive operations",
     }),
@@ -191,6 +191,42 @@ export function builtinRules(): RiskRule[] {
       pattern: "\\b(chmod|chown)\\b",
       risk: RiskLevel.MEDIUM,
       description: "Changing file permissions or ownership",
+    }),
+    // --- v2: SQL + messaging + publishing ---
+    new RiskRule({
+      name: "sql_mutation",
+      tool: "*",
+      pattern: "\\b(INSERT\\s+INTO|UPDATE\\s+\\w+\\s+SET|DELETE\\s+FROM|MERGE\\s+INTO|ALTER\\s+TABLE)\\b",
+      risk: RiskLevel.HIGH,
+      description: "SQL data mutation — requires explicit approval",
+    }),
+    new RiskRule({
+      name: "sql_platform_mutation",
+      tool: "*",
+      pattern: "\\b(CREATE\\s+OR\\s+REPLACE\\s+(TABLE|VIEW|FUNCTION)|COPY\\s+INTO|UNLOAD\\s+TO|bq\\s+extract|OPTIMIZE\\s+TABLE|VACUUM)\\b",
+      risk: RiskLevel.HIGH,
+      description: "Platform-specific data mutation or export",
+    }),
+    new RiskRule({
+      name: "messaging_broadcast",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(broadcast|bulk_send|mass_email|send_campaign|blast)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Bulk messaging or broadcast — mass impact",
+    }),
+    new RiskRule({
+      name: "messaging_single",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(send_message|send_email|post_message|send_reply|send_notification)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.MEDIUM,
+      description: "Single message send — confirm recipient",
+    }),
+    new RiskRule({
+      name: "publish_schedule",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(publish|schedule_send|go_live|activate_campaign|launch_campaign)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Publishing or scheduling content — potentially irreversible",
     }),
   ];
 }

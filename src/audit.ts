@@ -1,10 +1,17 @@
 /**
- * Lightweight audit log for scope-guard decisions with HMAC integrity signing.
+ * Audit log for scope-guard decisions with HMAC integrity signing and hash chain.
+ *
+ * Phase 3 enhancements:
+ *   - Hash chain: each entry includes prev_hash linking to the previous entry
+ *   - Session/user identity: session_id and user_id fields from env vars
+ *   - HMAC key separation: SCOPE_GUARD_HMAC_KEY env var takes precedence over file-based key
+ *   - verify() returns chain_breaks count for tamper detection
+ *   - escalation_reason and content_flags preserved from CheckResult
  */
 
 import { appendFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, createHash, randomBytes } from "node:crypto";
 import type { CheckResult } from "./checker.js";
 
 export interface AuditEntry {
@@ -15,11 +22,27 @@ export interface AuditEntry {
   risk_level: string;
   scope_violation: boolean;
   reason: string;
+  session_id?: string;
+  user_id?: string;
+  escalation_reason?: string;
+  content_flags?: string[];
+  matched_rules?: string[];
+  prev_hash?: string;
   hmac?: string;
 }
 
-/** Generate or load an HMAC key for audit signing. */
+export interface VerifyResult {
+  valid: number;
+  tampered: number;
+  unsigned: number;
+  chain_breaks: number;
+}
+
+/** Resolve HMAC key: env var takes precedence, then file-based key. */
 function getHmacKey(logPath: string): string {
+  const envKey = process.env.SCOPE_GUARD_HMAC_KEY;
+  if (envKey && envKey.length >= 16) return envKey;
+
   const keyPath = logPath + ".key";
   if (existsSync(keyPath)) {
     return readFileSync(keyPath, "utf-8").trim();
@@ -36,6 +59,11 @@ function computeHmac(entry: Omit<AuditEntry, "hmac">, key: string): string {
   return createHmac("sha256", key).update(payload).digest("hex");
 }
 
+/** Compute SHA-256 hash of a full signed entry (for chain linking). */
+function entryHash(signedEntry: AuditEntry): string {
+  return createHash("sha256").update(JSON.stringify(signedEntry)).digest("hex");
+}
+
 export class AuditLog {
   constructor(readonly path: string) {}
 
@@ -44,6 +72,8 @@ export class AuditLog {
   }
 
   record(result: CheckResult): void {
+    const lastHash = this.lastEntryHash();
+
     const entry: Omit<AuditEntry, "hmac"> = {
       timestamp: new Date().toISOString(),
       tool: result.tool,
@@ -52,7 +82,14 @@ export class AuditLog {
       risk_level: result.risk_level,
       scope_violation: result.scope_violation,
       reason: result.reason,
+      ...(process.env.SCOPE_GUARD_SESSION_ID && { session_id: process.env.SCOPE_GUARD_SESSION_ID }),
+      ...(process.env.SCOPE_GUARD_USER_ID && { user_id: process.env.SCOPE_GUARD_USER_ID }),
+      ...(result.escalation_reason && { escalation_reason: result.escalation_reason }),
+      ...(result.content_flags?.length && { content_flags: result.content_flags }),
+      ...(result.matched_rules?.length && { matched_rules: result.matched_rules }),
+      ...(lastHash && { prev_hash: lastHash }),
     };
+
     mkdirSync(dirname(this.path), { recursive: true });
     const key = getHmacKey(this.path);
     const signed: AuditEntry = { ...entry, hmac: computeHmac(entry, key) };
@@ -73,37 +110,73 @@ export class AuditLog {
     return entries.slice(-limit);
   }
 
-  /** Verify HMAC integrity of all audit entries. */
-  verify(): { valid: number; tampered: number; unsigned: number } {
+  /** Verify HMAC integrity and hash chain of all audit entries. */
+  verify(): VerifyResult {
     const entries = this.read(50_000);
     const keyPath = this.path + ".key";
-    if (!existsSync(keyPath)) return { valid: 0, tampered: 0, unsigned: entries.length };
-    const key = readFileSync(keyPath, "utf-8").trim();
+    const envKey = process.env.SCOPE_GUARD_HMAC_KEY;
+    const hasKey = (envKey && envKey.length >= 16) || existsSync(keyPath);
+    if (!hasKey) return { valid: 0, tampered: 0, unsigned: entries.length, chain_breaks: 0 };
+
+    const key = getHmacKey(this.path);
     let valid = 0;
     let tampered = 0;
     let unsigned = 0;
-    for (const entry of entries) {
+    let chainBreaks = 0;
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
       if (!entry.hmac) {
         unsigned++;
         continue;
       }
       const { hmac, ...rest } = entry;
       const expected = computeHmac(rest, key);
-      if (hmac === expected) valid++;
-      else tampered++;
+      if (hmac === expected) {
+        valid++;
+      } else {
+        tampered++;
+      }
+
+      // Check hash chain
+      if (i > 0 && entry.prev_hash) {
+        const prevExpected = entryHash(entries[i - 1]);
+        if (entry.prev_hash !== prevExpected) {
+          chainBreaks++;
+        }
+      }
     }
-    return { valid, tampered, unsigned };
+
+    return { valid, tampered, unsigned, chain_breaks: chainBreaks };
   }
 
-  summary(): { total: number; verdicts?: Record<string, number>; scope_violations?: number } {
+  summary(): { total: number; verdicts?: Record<string, number>; scope_violations?: number; escalations?: number } {
     const entries = this.read(50_000);
     if (entries.length === 0) return { total: 0 };
-    const verdicts: Record<string, number> = { allow: 0, warn: 0, block: 0 };
+    const verdicts: Record<string, number> = { allow: 0, warn: 0, escalate: 0, block: 0 };
     let scopeViolations = 0;
+    let escalations = 0;
     for (const e of entries) {
       verdicts[e.verdict] = (verdicts[e.verdict] ?? 0) + 1;
       if (e.scope_violation) scopeViolations++;
+      if (e.verdict === "escalate") escalations++;
     }
-    return { total: entries.length, verdicts, scope_violations: scopeViolations };
+    return { total: entries.length, verdicts, scope_violations: scopeViolations, escalations };
+  }
+
+  /** Get hash of the last entry in the log (for chain linking). */
+  private lastEntryHash(): string | undefined {
+    if (!existsSync(this.path)) return undefined;
+    const content = readFileSync(this.path, "utf-8").trimEnd();
+    if (!content) return undefined;
+    const lines = content.split("\n");
+    const lastLine = lines[lines.length - 1];
+    if (!lastLine) return undefined;
+    try {
+      const entry = JSON.parse(lastLine) as AuditEntry;
+      return entryHash(entry);
+    } catch {
+      return undefined;
+    }
   }
 }

@@ -99,6 +99,11 @@ export default definePluginEntry({
                 block: true,
                 blockReason: `[scope-guard] BLOCKED: ${result.reason} (target: ${result.target})`,
               };
+            case CheckVerdict.ESCALATE:
+              return {
+                requireApproval: true,
+                metadata: { escalation_reason: result.escalation_reason ?? result.reason, requires_human: true },
+              };
             case CheckVerdict.WARN:
               return {
                 requireApproval: true,

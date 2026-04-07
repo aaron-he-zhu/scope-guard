@@ -20,6 +20,24 @@ export interface ScopeRevision {
   added_dirs: string[];
 }
 
+/** Resource-level scoping for API/SaaS tools */
+export interface ResourceScope {
+  allowed_resources?: string[];
+  blocked_resources?: string[];
+  protected_resources?: string[];
+  allowed_urls?: string[];
+  blocked_urls?: string[];
+  escalation_keywords?: string[];
+  blocked_keywords?: string[];
+}
+
+/** Organizational boundary for multi-tenant */
+export interface OrgBoundary {
+  tenant_id?: string;
+  allowed_mcp_servers?: string[];
+  blocked_mcp_servers?: string[];
+}
+
 export interface ScopeBoundaryData {
   files_in_scope: string[];
   dirs_in_scope: string[];
@@ -29,6 +47,24 @@ export interface ScopeBoundaryData {
   task_summary: string;
   created_at: string;
   revisions: ScopeRevision[];
+  resources?: ResourceScope;
+  org_boundary?: OrgBoundary;
+  expand_requires_reason?: boolean;
+}
+
+function globSegmentMatch(pattern: string, value: string): boolean {
+  const pParts = pattern.split(":");
+  const vParts = value.split(":");
+  let pi = 0, vi = 0;
+  while (pi < pParts.length && vi < vParts.length) {
+    if (pParts[pi] === "**") return true;
+    if (pParts[pi] === "*" || pParts[pi].toLowerCase() === vParts[vi].toLowerCase()) { pi++; vi++; continue; }
+    // Support simple wildcards within segments: "get_*" matches "get_deal"
+    const re = new RegExp("^" + pParts[pi].replace(/\*/g, ".*") + "$", "i");
+    if (re.test(vParts[vi])) { pi++; vi++; continue; }
+    return false;
+  }
+  return pi === pParts.length && vi === vParts.length;
 }
 
 export class ScopeBoundary {
@@ -40,6 +76,9 @@ export class ScopeBoundary {
   task_summary: string;
   created_at: string;
   revisions: ScopeRevision[];
+  resources?: ResourceScope;
+  org_boundary?: OrgBoundary;
+  expand_requires_reason?: boolean;
 
   constructor(data?: Partial<ScopeBoundaryData>) {
     this.files_in_scope = data?.files_in_scope ?? [];
@@ -54,10 +93,18 @@ export class ScopeBoundary {
     this.task_summary = data?.task_summary ?? "";
     this.created_at = data?.created_at ?? new Date().toISOString();
     this.revisions = data?.revisions ?? [];
+    this.resources = data?.resources;
+    this.org_boundary = data?.org_boundary;
+    this.expand_requires_reason = data?.expand_requires_reason;
   }
 
   get isEmpty(): boolean {
     return this.files_in_scope.length === 0 && this.dirs_in_scope.length === 0;
+  }
+
+  get hasOrgBoundary(): boolean {
+    const org = this.org_boundary;
+    return !!(org?.allowed_mcp_servers?.length || org?.blocked_mcp_servers?.length);
   }
 
   /** Check if a file path falls within the declared scope. */
@@ -77,12 +124,49 @@ export class ScopeBoundary {
     return false;
   }
 
+  isMcpServerAllowed(server: string): boolean {
+    const org = this.org_boundary;
+    if (!org) return true;
+    if (org.blocked_mcp_servers?.some(b => server.toLowerCase().includes(b.toLowerCase()))) return false;
+    if (org.allowed_mcp_servers && org.allowed_mcp_servers.length > 0) {
+      return org.allowed_mcp_servers.some(a => server.toLowerCase().includes(a.toLowerCase()));
+    }
+    return true;
+  }
+
+  isResourceAllowed(resource: string): "allowed" | "blocked" | "protected" {
+    const res = this.resources;
+    if (!res) return "allowed";
+    if (res.protected_resources?.some(p => globSegmentMatch(p, resource))) return "protected";
+    if (res.blocked_resources?.some(p => globSegmentMatch(p, resource))) return "blocked";
+    if (res.allowed_resources && res.allowed_resources.length > 0) {
+      return res.allowed_resources.some(p => globSegmentMatch(p, resource)) ? "allowed" : "blocked";
+    }
+    return "allowed";
+  }
+
+  matchEscalationKeywords(text: string): string[] {
+    return (this.resources?.escalation_keywords ?? []).filter(k =>
+      text.toLowerCase().includes(k.toLowerCase())
+    );
+  }
+
+  matchBlockedKeywords(text: string): string[] {
+    return (this.resources?.blocked_keywords ?? []).filter(k =>
+      text.toLowerCase().includes(k.toLowerCase())
+    );
+  }
+
   /** Expand the scope boundary and record the revision. */
   expandScope(
     files?: string[],
     dirs?: string[],
     reason = "",
   ): void {
+    if (this.expand_requires_reason && !reason.trim()) {
+      throw new Error("expand_requires_reason is set — a non-empty reason is required");
+    }
+
     const revision: ScopeRevision = {
       action: "expand",
       timestamp: new Date().toISOString(),
@@ -120,6 +204,9 @@ export class ScopeBoundary {
       task_summary: this.task_summary,
       created_at: this.created_at,
       revisions: this.revisions,
+      resources: this.resources,
+      org_boundary: this.org_boundary,
+      expand_requires_reason: this.expand_requires_reason,
     };
   }
 
