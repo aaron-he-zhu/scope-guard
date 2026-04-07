@@ -4,7 +4,7 @@
 
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -659,6 +659,58 @@ describe("mutation resilience", () => {
     const r = checker.check("Read", { file_path: "/etc/shadow" });
     assert.equal(r.verdict, CheckVerdict.ALLOW);
     assert.equal(r.risk_level, RiskLevel.LOW);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+
+describe("init.ts", () => {
+  it("creates settings.json with hook", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-init-"));
+    execFileSync("node", [join(import.meta.dirname, "..", "dist", "init.js")], {
+      cwd: tmp,
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    const settingsPath = join(tmp, ".claude", "settings.json");
+    assert.ok(existsSync(settingsPath), "settings.json should exist");
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    assert.ok(settings.hooks?.PreToolUse?.length >= 1);
+    const hookCmd = settings.hooks.PreToolUse[0].hooks[0].command;
+    assert.ok(hookCmd.includes("hook.js"));
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("is idempotent — running twice doesn't duplicate hook", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-init-"));
+    const run = () => execFileSync("node", [join(import.meta.dirname, "..", "dist", "init.js")], {
+      cwd: tmp,
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    run();
+    run();
+    const settings = JSON.parse(readFileSync(join(tmp, ".claude", "settings.json"), "utf-8"));
+    assert.equal(settings.hooks.PreToolUse.length, 1, "hook should not be duplicated");
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("merges with existing settings", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-init-"));
+    const claudeDir = join(tmp, ".claude");
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ permissions: { allow: ["Read"] } }, null, 2));
+    execFileSync("node", [join(import.meta.dirname, "..", "dist", "init.js")], {
+      cwd: tmp,
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    const settings = JSON.parse(readFileSync(join(claudeDir, "settings.json"), "utf-8"));
+    assert.deepEqual(settings.permissions, { allow: ["Read"] }, "existing settings preserved");
+    assert.ok(settings.hooks?.PreToolUse?.length >= 1, "hook added");
+    rmSync(tmp, { recursive: true });
   });
 });
 

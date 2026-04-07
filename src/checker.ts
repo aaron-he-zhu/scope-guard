@@ -93,7 +93,7 @@ export class ScopeChecker {
         verdict: CheckVerdict.WARN,
         tool: toolName,
         target: "",
-        reason: "no file path detected — cannot verify scope",
+        reason: "no file path detected — cannot verify scope. Provide file_path to proceed",
         risk_level: risk,
         scope_violation: false,
       };
@@ -107,7 +107,7 @@ export class ScopeChecker {
         verdict,
         tool: toolName,
         target: filePath,
-        reason: verdict === CheckVerdict.ALLOW ? "in scope" : `in scope but ${risk} risk`,
+        reason: verdict === CheckVerdict.ALLOW ? "in scope" : verdict === CheckVerdict.BLOCK ? `in scope but ${risk} risk — requires explicit user confirmation` : `in scope but ${risk} risk`,
         risk_level: risk,
         scope_violation: false,
       };
@@ -119,7 +119,7 @@ export class ScopeChecker {
       verdict,
       tool: toolName,
       target: filePath,
-      reason: `out of scope (${filePath})`,
+      reason: `out of scope (${filePath}) — edit .claude/scope-boundary.json to expand scope`,
       risk_level: risk,
       scope_violation: true,
     };
@@ -134,7 +134,7 @@ export class ScopeChecker {
         verdict: CheckVerdict.BLOCK,
         tool: toolName,
         target: command,
-        reason: "high-risk shell command",
+        reason: "high-risk shell command — requires explicit user confirmation to proceed",
         risk_level: risk,
         scope_violation: false,
       };

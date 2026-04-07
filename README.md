@@ -54,7 +54,21 @@ npm install scope-guard
 # 2. Build
 npm run build
 
-# 3. Add hook to .claude/settings.json
+# 3. Auto-setup (hook + SKILL.md)
+npx scope-guard-init
+
+# Done — every tool call is now guarded
+```
+
+The init command is idempotent — safe to run multiple times. It:
+- Adds the `PreToolUse` hook to `.claude/settings.json` (merges with existing hooks)
+- Copies `SKILL.md` to `.claude/skills/scope-guard/`
+
+<details>
+<summary>Manual setup (alternative)</summary>
+
+```bash
+# Add hook to .claude/settings.json
 cat <<'EOF' >> .claude/settings.json
 {
   "hooks": {
@@ -68,8 +82,11 @@ cat <<'EOF' >> .claude/settings.json
 }
 EOF
 
-# 4. Done — every tool call is now guarded
+# Copy SKILL.md
+mkdir -p .claude/skills/scope-guard
+cp SKILL.md .claude/skills/scope-guard/
 ```
+</details>
 
 Or install the SKILL.md only (prompt-level, no code hook):
 

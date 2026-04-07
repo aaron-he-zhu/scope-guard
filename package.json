@@ -12,7 +12,8 @@
     "./audit": "./dist/audit.js"
   },
   "bin": {
-    "scope-guard": "./dist/hook.js"
+    "scope-guard": "./dist/hook.js",
+    "scope-guard-init": "./dist/init.js"
   },
   "openclaw": {
     "extensions": ["./dist/index.js"],
