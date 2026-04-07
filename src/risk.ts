@@ -228,5 +228,141 @@ export function builtinRules(): RiskRule[] {
       risk: RiskLevel.HIGH,
       description: "Publishing or scheduling content — potentially irreversible",
     }),
+    // --- v3: Industry-specific rules ---
+    // CRM / Sales
+    new RiskRule({
+      name: "crm_deal_mutation",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(update_deal|update_opportunity|change.*stage|set.*amount|update_amount|close.*(?:deal|opp|opportunity|account))(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "CRM deal/opportunity mutation — potential pipeline fraud",
+    }),
+    new RiskRule({
+      name: "crm_merge_ops",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(merge_contact|merge_account|merge_deal|merge_ticket|dedupe|consolidate)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "CRM merge — permanent data loss risk",
+    }),
+    new RiskRule({
+      name: "enrollment_mass",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(enroll_in|add_to_sequence|add_to_list|add_to_campaign|activate_workflow|trigger_workflow|bulk_enroll|subscribe_bulk)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Mass enrollment/sequence — spam/compliance risk",
+    }),
+    // Marketing / Social media
+    new RiskRule({
+      name: "social_media_post",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(create_tweet|schedule_tweet|post_tweet|publish_post|schedule_post|create_reel|publish_story|share_post|upload_video|create_article)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Social media posting — brand/reputation risk",
+    }),
+    new RiskRule({
+      name: "marketing_list_destruct",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(bulk_unsubscribe|suppress_all|delete.*(?:list|segment)|purge.*(?:list|segment)|unsubscribe_all|bulk_suppress)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Marketing list destruction — campaign damage",
+    }),
+    // Clinical / Healthcare
+    new RiskRule({
+      name: "clinical_order",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(prescribe|order.*medication|medication_order|administer|dispense|titrate|discontinue)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Clinical medication order ��� patient safety critical",
+    }),
+    new RiskRule({
+      name: "clinical_procedure",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(schedule_procedure|surgery|intervention|cancel_order|schedule_surgery)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Clinical procedure scheduling — patient safety critical",
+    }),
+    // Supply chain / Procurement
+    new RiskRule({
+      name: "procurement_order",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(purchase_order|vendor_invoice|confirm_receipt|goods_receipt|three_way_match|invoice_approval|material_receipt|po_confirm)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Procurement operation — financial commitment",
+    }),
+    new RiskRule({
+      name: "inventory_adjust",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(inventory_adjust|stock_update|warehouse.*move|cycle_count|stock_transfer)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Inventory mutation — asset integrity risk",
+    }),
+    new RiskRule({
+      name: "shipment_divert",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(re[_-]?route|reroute|divert|hold_shipment|release_shipment|shipment_hold|in_transit_change|carrier.*change)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Shipment routing change — cargo theft/trade compliance risk",
+    }),
+    // HR / People ops
+    new RiskRule({
+      name: "termination_ops",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(terminat|offboard|exit_interview|severance|final_paycheck|separation|deactivat|remove_access|last_day)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Employee termination/offboarding — sensitive HR operation",
+    }),
+    // Legal
+    new RiskRule({
+      name: "litigation_hold",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(litigation[_.]hold|legal[_.]hold|preserve|custodian|hold_notice|retention_hold|delete_hold|modify_hold)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Litigation hold operation — evidence preservation critical",
+    }),
+    // IaC / DevOps
+    new RiskRule({
+      name: "iac_destructive",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(terraform.*destroy|kubectl.*delete|helm.*uninstall|pulumi.*destroy|cdk.*destroy)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Infrastructure destruction — service disruption risk",
+    }),
+    new RiskRule({
+      name: "iac_apply",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(terraform.*apply|helm.*(?:upgrade|install)|kubectl.*apply|pulumi.*up|cdk.*deploy)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.MEDIUM,
+      description: "Infrastructure apply — review required before mutation",
+    }),
+    // Finance / Accounting
+    new RiskRule({
+      name: "financial_reversal",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(reverse.*(?:journal|entry|posting)|reopen.*period|reclass|reclassify|override_control|void.*(?:check|payment))(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Financial reversal/reclassification — SOX critical",
+    }),
+    new RiskRule({
+      name: "payment_release",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(create_payout|release_payment|wire_transfer|approve_payment|ach_transfer|process_disbursement)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Payment release/wire transfer — fraud risk",
+    }),
+    new RiskRule({
+      name: "tax_adjustment",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(tax_reversal|adjust.*(?:tax|provision)|estimated_tax|write_off)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Tax/provision adjustment — audit-sensitive",
+    }),
+    // Support
+    new RiskRule({
+      name: "support_bulk_ops",
+      tool: "*",
+      pattern: "(?:^|[^a-zA-Z])(bulk_assign|escalate_tickets|merge.*ticket|reassign_all|bulk_close)(?:$|[^a-zA-Z])",
+      risk: RiskLevel.HIGH,
+      description: "Support bulk operations — service disruption risk",
+    }),
   ];
 }

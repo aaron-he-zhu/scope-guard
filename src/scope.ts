@@ -31,11 +31,19 @@ export interface ResourceScope {
   blocked_keywords?: string[];
 }
 
+/** Per-server operation-level access control */
+export interface McpResourceRule {
+  server: string;
+  allowed_operations?: string[];
+  blocked_operations?: string[];
+}
+
 /** Organizational boundary for multi-tenant */
 export interface OrgBoundary {
   tenant_id?: string;
   allowed_mcp_servers?: string[];
   blocked_mcp_servers?: string[];
+  mcp_resource_rules?: McpResourceRule[];
 }
 
 export interface ScopeBoundaryData {
@@ -50,6 +58,38 @@ export interface ScopeBoundaryData {
   resources?: ResourceScope;
   org_boundary?: OrgBoundary;
   expand_requires_reason?: boolean;
+}
+
+/** Escape special regex characters. */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Word-boundary keyword matching.
+ * Uses non-letter boundaries for ASCII keywords; falls back to substring for CJK.
+ */
+function keywordBoundaryMatch(keyword: string, text: string): boolean {
+  // CJK detection: if keyword contains CJK characters, use substring match
+  if (/[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/.test(keyword)) {
+    return text.toLowerCase().includes(keyword.toLowerCase());
+  }
+  const escaped = escapeRegex(keyword);
+  const re = new RegExp(`(?:^|[^a-zA-Z0-9])${escaped}(?:$|[^a-zA-Z0-9])`, "i");
+  return re.test(text);
+}
+
+/**
+ * Glob-style server name matching.
+ * Supports `*` wildcards: "notion" matches exactly, "notion_*" matches "notion_prod".
+ * Falls back to exact match when no wildcards present.
+ */
+function serverGlobMatch(pattern: string, server: string): boolean {
+  const p = pattern.toLowerCase();
+  const s = server.toLowerCase();
+  if (!p.includes("*")) return p === s;
+  const re = new RegExp("^" + escapeRegex(p).replace(/\\\*/g, ".*") + "$");
+  return re.test(s);
 }
 
 function globSegmentMatch(pattern: string, value: string): boolean {
@@ -127,9 +167,27 @@ export class ScopeBoundary {
   isMcpServerAllowed(server: string): boolean {
     const org = this.org_boundary;
     if (!org) return true;
-    if (org.blocked_mcp_servers?.some(b => server.toLowerCase().includes(b.toLowerCase()))) return false;
+    if (org.blocked_mcp_servers?.some(b => serverGlobMatch(b, server))) return false;
     if (org.allowed_mcp_servers && org.allowed_mcp_servers.length > 0) {
-      return org.allowed_mcp_servers.some(a => server.toLowerCase().includes(a.toLowerCase()));
+      return org.allowed_mcp_servers.some(a => serverGlobMatch(a, server));
+    }
+    return true;
+  }
+
+  /**
+   * Check if a specific MCP operation is allowed on a server.
+   * Uses mcp_resource_rules for per-server operation allow/block.
+   * Returns true if no rules apply or operation is allowed.
+   */
+  isMcpOperationAllowed(server: string, operation: string): boolean {
+    const rules = this.org_boundary?.mcp_resource_rules;
+    if (!rules || rules.length === 0) return true;
+    for (const rule of rules) {
+      if (!serverGlobMatch(rule.server, server)) continue;
+      if (rule.blocked_operations?.some(p => serverGlobMatch(p, operation))) return false;
+      if (rule.allowed_operations && rule.allowed_operations.length > 0) {
+        return rule.allowed_operations.some(p => serverGlobMatch(p, operation));
+      }
     }
     return true;
   }
@@ -147,13 +205,13 @@ export class ScopeBoundary {
 
   matchEscalationKeywords(text: string): string[] {
     return (this.resources?.escalation_keywords ?? []).filter(k =>
-      text.toLowerCase().includes(k.toLowerCase())
+      keywordBoundaryMatch(k, text)
     );
   }
 
   matchBlockedKeywords(text: string): string[] {
     return (this.resources?.blocked_keywords ?? []).filter(k =>
-      text.toLowerCase().includes(k.toLowerCase())
+      keywordBoundaryMatch(k, text)
     );
   }
 

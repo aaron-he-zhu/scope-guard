@@ -3,6 +3,7 @@
  * with MCP tool classification, resource scoping, and content scanning.
  */
 
+import { createHash } from "node:crypto";
 import { RiskEngine, RiskLevel, riskOrd } from "./risk.js";
 import { ScopeBoundary } from "./scope.js";
 import { ContentScanner } from "./content.js";
@@ -12,6 +13,14 @@ export enum CheckVerdict {
   WARN = "warn",
   ESCALATE = "escalate",
   BLOCK = "block",
+}
+
+export interface ParamsSummary {
+  resource_id_hash?: string;
+  transaction_amount?: string;
+  operation_scope?: "single" | "batch" | "export";
+  mcp_server?: string;
+  mcp_operation?: string;
 }
 
 export interface CheckResult {
@@ -24,6 +33,7 @@ export interface CheckResult {
   escalation_reason?: string;
   matched_rules?: string[];
   content_flags?: string[];
+  params_summary?: ParamsSummary;
 }
 
 /** Tools that are truly inert — always allow without any check. */
@@ -41,14 +51,28 @@ const FILE_PATH_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
  */
 const MCP_WRITE_VERBS = new RegExp(
   "(?:^|_)(" + [
+    // CRUD
     "create", "update", "delete", "remove", "add", "set", "put",
-    "post", "patch", "push", "send", "publish", "broadcast", "notify", "reply",
-    "close", "resolve", "approve", "reject", "assign", "merge",
+    "post", "patch", "push", "insert", "move", "write", "fork",
+    // Communication
+    "send", "publish", "broadcast", "notify", "reply",
+    // State changes
+    "resolve", "approve", "reject", "assign", "merge",
     "submit", "cancel", "revoke", "grant",
+    // Scheduling / activation
     "schedule", "queue", "enqueue", "activate", "launch",
     "enable", "disable",
+    // Execution
     "start", "execute", "run", "dispense", "transfer",
-    "insert", "move", "write", "fork",
+    // IaC / DevOps
+    "apply", "destroy", "scale", "rollout", "upgrade",
+    "deploy", "provision", "terminate", "rollback", "revert", "sync",
+    // Clinical / Healthcare
+    "prescribe", "order", "administer", "discontinue", "titrate",
+    // Supply chain / Finance
+    "adjust", "reverse", "reopen", "reclassify", "divert", "route",
+    // Marketing / Enrollment
+    "enroll", "unsubscribe", "suppress", "export", "import", "configure",
   ].join("|") + ")(?:_|$)",
   "i",
 );
@@ -57,6 +81,54 @@ function parseMcpTool(toolName: string): { server: string; operation: string } |
   const parts = toolName.split("__");
   if (parts.length < 3 || parts[0] !== "mcp") return null;
   return { server: parts.slice(1, -1).join("__"), operation: parts[parts.length - 1] };
+}
+
+/** Hash a resource ID for safe audit logging (no plaintext PII). */
+function hashResourceId(id: string): string {
+  return createHash("sha256").update(id).digest("hex").slice(0, 16);
+}
+
+/** Extract first *_id field from params for resource tracking. */
+function extractResourceId(params: Record<string, unknown>): string | undefined {
+  for (const [key, val] of Object.entries(params)) {
+    if (/_id$|^id$/.test(key) && val != null && val !== "") return String(val);
+  }
+  return undefined;
+}
+
+/** Extract transaction amount from params. */
+function extractAmount(params: Record<string, unknown>): string | undefined {
+  for (const key of ["amount", "value", "total", "price", "cost"]) {
+    const val = params[key];
+    if (val != null && val !== "") return String(val);
+  }
+  return undefined;
+}
+
+/** Infer operation scope from operation name or params. */
+function inferScope(operation: string, params: Record<string, unknown>): "single" | "batch" | "export" | undefined {
+  if (/bulk|batch|mass|all\b/i.test(operation)) return "batch";
+  if (/export|download|extract/i.test(operation)) return "export";
+  if (Array.isArray(params.ids) || Array.isArray(params.items)) return "batch";
+  return "single";
+}
+
+/** Build a ParamsSummary from MCP tool context. */
+function buildParamsSummary(
+  parsed: { server: string; operation: string } | null,
+  params: Record<string, unknown>,
+): ParamsSummary | undefined {
+  if (!parsed) return undefined;
+  const resourceId = extractResourceId(params);
+  const amount = extractAmount(params);
+  const scope = inferScope(parsed.operation, params);
+  return {
+    mcp_server: parsed.server,
+    mcp_operation: parsed.operation,
+    ...(resourceId && { resource_id_hash: hashResourceId(resourceId) }),
+    ...(amount && { transaction_amount: amount }),
+    ...(scope && { operation_scope: scope }),
+  };
 }
 
 export class ScopeChecker {
@@ -193,6 +265,7 @@ export class ScopeChecker {
     const target = extractTarget(toolName, params);
     const risk = this.riskEngine.assess(toolName, params);
     const matchedRules = this.riskEngine.matchingRules(toolName, params).map(r => r.name);
+    const params_summary = buildParamsSummary(parsed, params);
 
     // 1. OrgBoundary: server allow/block list
     if (parsed && !this.boundary.isMcpServerAllowed(parsed.server)) {
@@ -204,6 +277,21 @@ export class ScopeChecker {
         risk_level: RiskLevel.HIGH,
         scope_violation: true,
         matched_rules: matchedRules,
+        params_summary,
+      };
+    }
+
+    // 1b. OrgBoundary: per-server operation rules
+    if (parsed && !this.boundary.isMcpOperationAllowed(parsed.server, parsed.operation)) {
+      return {
+        verdict: CheckVerdict.BLOCK,
+        tool: toolName,
+        target,
+        reason: `MCP operation "${parsed.operation}" not allowed on server "${parsed.server}" — configure mcp_resource_rules`,
+        risk_level: RiskLevel.HIGH,
+        scope_violation: true,
+        matched_rules: matchedRules,
+        params_summary,
       };
     }
 
@@ -220,6 +308,7 @@ export class ScopeChecker {
         scope_violation: false,
         escalation_reason: `MCP call contains escalation keywords: ${escKeywords.join(", ")}`,
         matched_rules: matchedRules,
+        params_summary,
       };
     }
 
@@ -234,6 +323,7 @@ export class ScopeChecker {
         risk_level: RiskLevel.MEDIUM,
         scope_violation: false,
         matched_rules: matchedRules,
+        params_summary,
       };
     }
 
@@ -241,10 +331,28 @@ export class ScopeChecker {
     const scan = this.scanner.scan(paramsStr);
     const contentFlags = scan.flags.length > 0 ? scan.flags.map(f => f.pattern_name) : undefined;
 
-    // 5. Write verb detection
+    // 5. Resource scope check for write operations
     const isWrite = parsed ? MCP_WRITE_VERBS.test(parsed.operation) : false;
 
     if (isWrite) {
+      // 5a. Check resource scope on writes (P4-B)
+      const resourceTarget = extractTarget(toolName, params);
+      if (resourceTarget && this.boundary.resources?.protected_resources?.length) {
+        const resStatus = this.boundary.isResourceAllowed(resourceTarget);
+        if (resStatus === "protected") {
+          return {
+            verdict: CheckVerdict.BLOCK,
+            tool: toolName,
+            target: resourceTarget,
+            reason: "protected resource — write access denied",
+            risk_level: RiskLevel.HIGH,
+            scope_violation: true,
+            matched_rules: matchedRules,
+            params_summary,
+          };
+        }
+      }
+
       // Write operations: minimum MEDIUM, risk rules can escalate further
       const effectiveRisk = riskOrd(risk) > riskOrd(RiskLevel.MEDIUM) ? risk : RiskLevel.MEDIUM;
       const verdict = riskOrd(effectiveRisk) >= riskOrd(RiskLevel.HIGH)
@@ -259,6 +367,7 @@ export class ScopeChecker {
         scope_violation: false,
         matched_rules: matchedRules,
         content_flags: contentFlags,
+        params_summary,
       };
     }
 
@@ -273,6 +382,7 @@ export class ScopeChecker {
         scope_violation: false,
         matched_rules: matchedRules,
         content_flags: contentFlags,
+        params_summary,
       };
     }
 
@@ -284,6 +394,7 @@ export class ScopeChecker {
       risk_level: RiskLevel.LOW,
       scope_violation: false,
       content_flags: contentFlags,
+      params_summary,
     };
   }
 

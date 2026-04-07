@@ -2,7 +2,7 @@
  * Policy engine — layered configuration with compliance presets.
  *
  * Supports:
- *   - compliance_mode: "hipaa" | "sox" | "pci" | "legal" | "custom"
+ *   - compliance_mode: "hipaa" | "sox" | "pci" | "legal" | "hr" | "clinical" | "research" | "supply_chain" | "supply_chain_sap" | "marketing_content" | "custom"
  *   - extends: chain up to 5 levels of policy inheritance
  *   - tool_overrides: per-tool risk level overrides
  *   - most-restrictive-wins merge semantics
@@ -12,7 +12,12 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { RiskLevel, RiskRule, RiskEngine, builtinRules, riskOrd } from "./risk.js";
 
-export type ComplianceMode = "hipaa" | "sox" | "pci" | "legal" | "custom";
+export type ComplianceMode =
+  | "hipaa" | "sox" | "pci" | "legal"
+  | "hr" | "clinical" | "research"
+  | "supply_chain" | "supply_chain_sap"
+  | "marketing_content"
+  | "custom";
 
 export interface PolicyConfig {
   compliance_mode?: ComplianceMode;
@@ -82,6 +87,78 @@ const PRESETS: Record<ComplianceMode, Partial<PolicyConfig>> = {
     extra_rules: [
       { name: "legal_privilege", tool: "*", pattern: "(?:^|[^a-zA-Z])(attorney.client|privileged|work.product|litigation.hold)", risk: RiskLevel.HIGH, description: "Privileged legal content" },
       { name: "legal_external_comms", tool: "*", pattern: "(?:^|[^a-zA-Z])(send|post|publish|broadcast).*(?:opposing|counsel|court|regulator)", risk: RiskLevel.HIGH, description: "External legal communications" },
+    ],
+    blocked_tools: [],
+    max_risk_auto_allow: RiskLevel.LOW,
+    require_scope_boundary: true,
+  },
+  hr: {
+    extra_rules: [
+      { name: "hr_termination", tool: "*", pattern: "(?:^|[^a-zA-Z])(terminat|offboard|severance|separation|final_paycheck|exit_interview|deactivat|remove_access)", risk: RiskLevel.HIGH, description: "Employee termination/offboarding" },
+      { name: "hr_compensation", tool: "*", pattern: "(?:^|[^a-zA-Z])(salary|compensation|bonus|equity_grant|stock_option|wage)\\s*[:=]", risk: RiskLevel.HIGH, description: "Compensation data mutation" },
+      { name: "hr_bulk_ops", tool: "*", pattern: "(?:^|[^a-zA-Z])(bulk_assign|mass_update|batch.*employee|bulk_send.*(?:feedback|review|offer))", risk: RiskLevel.HIGH, description: "HR bulk operations" },
+    ],
+    blocked_tools: [],
+    max_risk_auto_allow: RiskLevel.LOW,
+    require_scope_boundary: true,
+  },
+  clinical: {
+    // Clinical extends HIPAA: inherits PHI export/transmission rules + adds clinical order rules.
+    // Use loadPolicy with extends to layer on top of hipaa.
+    tool_overrides: {
+      "WebFetch": RiskLevel.MEDIUM,
+      "WebSearch": RiskLevel.MEDIUM,
+    },
+    extra_rules: [
+      // HIPAA baseline rules
+      { name: "hipaa_phi_export", tool: "*", pattern: "(?:^|[^a-zA-Z])(export|download|extract).*(?:patient|medical|health|PHI)", risk: RiskLevel.HIGH, description: "PHI data export" },
+      { name: "hipaa_external_send", tool: "*", pattern: "(?:^|[^a-zA-Z])(send|email|fax|transmit).*(?:patient|medical|record)", risk: RiskLevel.HIGH, description: "External PHI transmission" },
+      // Clinical-specific rules
+      { name: "clinical_medication_order", tool: "*", pattern: "(?:^|[^a-zA-Z])(prescribe|medication_order|administer|dispense|titrate|discontinue)", risk: RiskLevel.HIGH, description: "Medication order — patient safety" },
+      { name: "clinical_procedure_schedule", tool: "*", pattern: "(?:^|[^a-zA-Z])(schedule_procedure|surgery|intervention|cancel_order)", risk: RiskLevel.HIGH, description: "Clinical procedure scheduling" },
+    ],
+    blocked_tools: [],
+    max_risk_auto_allow: RiskLevel.LOW,
+    require_scope_boundary: true,
+  },
+  research: {
+    // Research: 45 CFR 46 (Common Rule), less restrictive than HIPAA for de-identified data.
+    extra_rules: [
+      { name: "research_data_mutation", tool: "*", pattern: "(?:^|[^a-zA-Z])(INSERT|UPDATE|DELETE|ALTER).*(?:trial|experiment|protocol|sample|specimen)", risk: RiskLevel.HIGH, description: "Research data mutation — data integrity" },
+      { name: "research_export", tool: "*", pattern: "(?:^|[^a-zA-Z])(export|download|extract).*(?:trial|experiment|patient|subject|participant)", risk: RiskLevel.HIGH, description: "Research data export" },
+    ],
+    blocked_tools: [],
+    max_risk_auto_allow: RiskLevel.MEDIUM,
+    require_scope_boundary: true,
+  },
+  supply_chain: {
+    extra_rules: [
+      { name: "sc_procurement", tool: "*", pattern: "(?:^|[^a-zA-Z])(purchase_order|vendor_invoice|confirm_receipt|goods_receipt|invoice_approval|po_confirm)", risk: RiskLevel.HIGH, description: "Procurement operation" },
+      { name: "sc_inventory", tool: "*", pattern: "(?:^|[^a-zA-Z])(inventory_adjust|stock_update|warehouse.*move|cycle_count)", risk: RiskLevel.HIGH, description: "Inventory mutation" },
+      { name: "sc_shipment", tool: "*", pattern: "(?:^|[^a-zA-Z])(re[_-]?route|reroute|divert|hold_shipment|release_shipment)", risk: RiskLevel.HIGH, description: "Shipment routing change" },
+    ],
+    blocked_tools: [],
+    max_risk_auto_allow: RiskLevel.LOW,
+    require_scope_boundary: true,
+  },
+  supply_chain_sap: {
+    // SAP-specific extensions on top of base supply_chain preset
+    extra_rules: [
+      { name: "sc_procurement", tool: "*", pattern: "(?:^|[^a-zA-Z])(purchase_order|vendor_invoice|confirm_receipt|goods_receipt|invoice_approval|po_confirm)", risk: RiskLevel.HIGH, description: "Procurement operation" },
+      { name: "sc_inventory", tool: "*", pattern: "(?:^|[^a-zA-Z])(inventory_adjust|stock_update|warehouse.*move|cycle_count)", risk: RiskLevel.HIGH, description: "Inventory mutation" },
+      { name: "sc_shipment", tool: "*", pattern: "(?:^|[^a-zA-Z])(re[_-]?route|reroute|divert|hold_shipment|release_shipment)", risk: RiskLevel.HIGH, description: "Shipment routing change" },
+      { name: "sap_mm_mutation", tool: "*", pattern: "(?:^|[^a-zA-Z])(MIGO|MIRO|ME21N|ME22N|ME23N|MB1A|MB1B|MB1C)(?:$|[^a-zA-Z])", risk: RiskLevel.HIGH, description: "SAP MM transaction codes" },
+      { name: "sap_fi_mutation", tool: "*", pattern: "(?:^|[^a-zA-Z])(FB01|FB50|F-02|F-04|FK01|FBL1N)(?:$|[^a-zA-Z])", risk: RiskLevel.HIGH, description: "SAP FI transaction codes" },
+    ],
+    blocked_tools: [],
+    max_risk_auto_allow: RiskLevel.LOW,
+    require_scope_boundary: true,
+  },
+  marketing_content: {
+    extra_rules: [
+      { name: "mkt_social_post", tool: "*", pattern: "(?:^|[^a-zA-Z])(create_tweet|schedule_tweet|post_tweet|publish_post|schedule_post|create_reel|publish_story|upload_video)", risk: RiskLevel.HIGH, description: "Social media posting — brand risk" },
+      { name: "mkt_list_destruct", tool: "*", pattern: "(?:^|[^a-zA-Z])(bulk_unsubscribe|suppress_all|delete.*list|purge.*list|unsubscribe_all)", risk: RiskLevel.HIGH, description: "Marketing list destruction" },
+      { name: "mkt_campaign_activate", tool: "*", pattern: "(?:^|[^a-zA-Z])(activate_campaign|launch_campaign|send_campaign|go_live)", risk: RiskLevel.HIGH, description: "Campaign activation — irreversible" },
     ],
     blocked_tools: [],
     max_risk_auto_allow: RiskLevel.LOW,

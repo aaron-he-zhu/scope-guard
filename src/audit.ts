@@ -13,6 +13,7 @@ import { appendFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHmac, createHash, randomBytes } from "node:crypto";
 import type { CheckResult } from "./checker.js";
+import { ContentScanner } from "./content.js";
 
 export interface AuditEntry {
   timestamp: string;
@@ -27,6 +28,13 @@ export interface AuditEntry {
   escalation_reason?: string;
   content_flags?: string[];
   matched_rules?: string[];
+  // v3: MCP context
+  mcp_server?: string;
+  mcp_operation?: string;
+  // v3: business context (resource ID stored as hash for PHI safety)
+  resource_id_hash?: string;
+  operation_scope?: "single" | "batch" | "export";
+  transaction_amount?: string;
   prev_hash?: string;
   hmac?: string;
 }
@@ -87,6 +95,11 @@ export class AuditLog {
       ...(result.escalation_reason && { escalation_reason: result.escalation_reason }),
       ...(result.content_flags?.length && { content_flags: result.content_flags }),
       ...(result.matched_rules?.length && { matched_rules: result.matched_rules }),
+      ...(result.params_summary?.mcp_server && { mcp_server: result.params_summary.mcp_server }),
+      ...(result.params_summary?.mcp_operation && { mcp_operation: result.params_summary.mcp_operation }),
+      ...(result.params_summary?.resource_id_hash && { resource_id_hash: result.params_summary.resource_id_hash }),
+      ...(result.params_summary?.operation_scope && { operation_scope: result.params_summary.operation_scope }),
+      ...(result.params_summary?.transaction_amount && { transaction_amount: result.params_summary.transaction_amount }),
       ...(lastHash && { prev_hash: lastHash }),
     };
 
@@ -162,6 +175,36 @@ export class AuditLog {
       if (e.verdict === "escalate") escalations++;
     }
     return { total: entries.length, verdicts, scope_violations: scopeViolations, escalations };
+  }
+
+  /**
+   * Export audit entries with optional redaction.
+   * Full log is signed as-is; redaction only applies to the exported output.
+   * This preserves HMAC integrity while allowing safe sharing.
+   */
+  export(options?: { redact?: boolean; limit?: number }): string {
+    const entries = this.read(options?.limit ?? 50_000);
+    if (!options?.redact) {
+      return entries.map(e => JSON.stringify(e)).join("\n");
+    }
+    const scanner = new ContentScanner();
+    return entries.map(e => {
+      const redacted = { ...e };
+      if (redacted.target) {
+        const scan = scanner.scan(redacted.target);
+        if (scan.flags.length > 0) {
+          let t = redacted.target;
+          for (const flag of scan.flags) {
+            const re = ContentScanner.getPattern(flag.pattern_name);
+            if (re) t = t.replace(re, `[REDACTED:${flag.pattern_name}]`);
+          }
+          redacted.target = t;
+        }
+      }
+      // Remove HMAC from redacted export (no longer verifiable after redaction)
+      delete (redacted as Partial<AuditEntry>).hmac;
+      return JSON.stringify(redacted);
+    }).join("\n");
   }
 
   /** Get hash of the last entry in the log (for chain linking). */

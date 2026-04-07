@@ -97,7 +97,7 @@ describe("RiskEngine", () => {
   it("head .env is HIGH (secret_files rule)", () => assert.equal(engine.assess("Bash", { command: "head .env" }), RiskLevel.HIGH));
   it("cat safe file is LOW", () => assert.equal(engine.assess("Bash", { command: "cat README.md" }), RiskLevel.LOW));
 
-  it("builtin rules count is 19", () => assert.equal(builtinRules().length, 19));
+  it("builtin rules count is 37", () => assert.equal(builtinRules().length, 37));
 
   // v2 SQL mutation rules
   it("INSERT INTO is HIGH", () => assert.equal(engine.assess("Bash", { command: "INSERT INTO users VALUES (1)" }), RiskLevel.HIGH));
@@ -860,9 +860,14 @@ describe("command truncation", () => {
 describe("MCP tool classification", () => {
   const checker = new ScopeChecker(new ScopeBoundary());
 
-  it("MCP write tool is WARN", () => {
-    const r = checker.check("mcp__hubspot__update_deal", { deal_id: "123" });
+  it("MCP write tool is WARN (generic write)", () => {
+    const r = checker.check("mcp__hubspot__update_contact", { contact_id: "123" });
     assert.equal(r.verdict, CheckVerdict.WARN);
+  });
+
+  it("MCP deal mutation is BLOCK (crm_deal_mutation rule)", () => {
+    const r = checker.check("mcp__hubspot__update_deal", { deal_id: "123" });
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
   });
 
   it("MCP read tool is ALLOW", () => {
@@ -1246,5 +1251,310 @@ describe("OutputFilter", () => {
   it("bearer token redacted", () => {
     const { text } = filter.redact("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test.sig");
     assert.ok(text.includes("[REDACTED:bearer_token]"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3: Escalation keyword word-boundary matching
+// ---------------------------------------------------------------------------
+
+describe("v3 keyword boundary matching", () => {
+  it("lawsuit matches standalone", () => {
+    const b = new ScopeBoundary({ resources: { escalation_keywords: ["lawsuit"] } });
+    assert.deepEqual(b.matchEscalationKeywords("filed a lawsuit today"), ["lawsuit"]);
+  });
+
+  it("lawsuit does NOT match inside lawsuitability", () => {
+    const b = new ScopeBoundary({ resources: { escalation_keywords: ["lawsuit"] } });
+    assert.deepEqual(b.matchEscalationKeywords("lawsuitability analysis"), []);
+  });
+
+  it("refund matches at boundary", () => {
+    const b = new ScopeBoundary({ resources: { escalation_keywords: ["refund"] } });
+    assert.deepEqual(b.matchEscalationKeywords("request-refund-now"), ["refund"]);
+  });
+
+  it("blocked keyword boundary rejects partial words", () => {
+    const b = new ScopeBoundary({ resources: { blocked_keywords: ["confidential"] } });
+    // "nonconfidential" (no separator) should NOT match
+    assert.deepEqual(b.matchBlockedKeywords("nonconfidential doc"), []);
+    // "non-confidential" (hyphen separator) DOES match since hyphen is a boundary
+    assert.deepEqual(b.matchBlockedKeywords("non-confidential-doc"), ["confidential"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3: MCP server glob matching
+// ---------------------------------------------------------------------------
+
+describe("v3 MCP server glob matching", () => {
+  it("exact match works", () => {
+    const b = new ScopeBoundary({ org_boundary: { allowed_mcp_servers: ["hubspot"] } });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__hubspot__get_deal", {});
+    assert.equal(r.verdict, CheckVerdict.ALLOW);
+  });
+
+  it("glob pattern works", () => {
+    const b = new ScopeBoundary({ org_boundary: { allowed_mcp_servers: ["notion_*"] } });
+    const checker = new ScopeChecker(b);
+    const r1 = checker.check("mcp__notion_prod__get_page", {});
+    assert.equal(r1.verdict, CheckVerdict.ALLOW);
+    const r2 = checker.check("mcp__notion_staging__get_page", {});
+    assert.equal(r2.verdict, CheckVerdict.ALLOW);
+  });
+
+  it("exact match rejects partial", () => {
+    const b = new ScopeBoundary({ org_boundary: { allowed_mcp_servers: ["notion"] } });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__notion_prod__get_page", {});
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3: MCP resource rules (per-server operation control)
+// ---------------------------------------------------------------------------
+
+describe("v3 MCP resource rules", () => {
+  it("blocked operation is BLOCK", () => {
+    const b = new ScopeBoundary({
+      org_boundary: {
+        mcp_resource_rules: [{ server: "sap", blocked_operations: ["fi_*"] }],
+      },
+    });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__sap__fi_post_journal", {});
+    assert.equal(r.verdict, CheckVerdict.BLOCK);
+    assert.ok(r.reason.includes("not allowed"));
+  });
+
+  it("allowed operation passes", () => {
+    const b = new ScopeBoundary({
+      org_boundary: {
+        mcp_resource_rules: [{ server: "sap", allowed_operations: ["mm_*"] }],
+      },
+    });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__sap__mm_create_po", {});
+    // mm_create_po is allowed but "create" is a write verb → WARN (not BLOCK)
+    assert.notEqual(r.verdict, CheckVerdict.BLOCK);
+  });
+
+  it("non-matching server has no effect", () => {
+    const b = new ScopeBoundary({
+      org_boundary: {
+        mcp_resource_rules: [{ server: "sap", blocked_operations: ["fi_*"] }],
+      },
+    });
+    const checker = new ScopeChecker(b);
+    const r = checker.check("mcp__hubspot__get_deal", {});
+    assert.equal(r.verdict, CheckVerdict.ALLOW);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3: New content patterns
+// ---------------------------------------------------------------------------
+
+describe("v3 ContentScanner new patterns", () => {
+  const scanner = new ContentScanner();
+
+  it("detects IBAN", () => {
+    const r = scanner.scan("IBAN: DE89 3704 0044 0532 0130 00");
+    assert.ok(r.flags.some(f => f.pattern_name === "iban"));
+  });
+
+  it("detects medication dosage", () => {
+    const r = scanner.scan("dose: 500 mg daily");
+    assert.ok(r.flags.some(f => f.pattern_name === "medication_dosage"));
+  });
+
+  it("detects lab result", () => {
+    const r = scanner.scan("glucose: 120 mg/dL");
+    assert.ok(r.flags.some(f => f.pattern_name === "lab_result"));
+  });
+
+  it("detects salary keyword with context", () => {
+    const r = scanner.scan("employee salary: $150000");
+    assert.ok(r.flags.some(f => f.pattern_name === "salary_keyword"));
+  });
+
+  it("does NOT flag salary in job posting", () => {
+    const r = scanner.scan("salary range: $120k-$180k per our job posting");
+    // "salary range" lacks required prefix (employee/your/annual/base)
+    assert.ok(!r.flags.some(f => f.pattern_name === "salary_keyword"));
+  });
+
+  it("detects tariff code", () => {
+    const r = scanner.scan("HTS: 8471.30.0100");
+    assert.ok(r.flags.some(f => f.pattern_name === "tariff_code"));
+  });
+
+  it("detects privilege marker", () => {
+    const r = scanner.scan("This document is PRIVILEGED AND CONFIDENTIAL");
+    assert.ok(r.flags.some(f => f.pattern_name === "privilege_marker"));
+  });
+
+  it("does NOT flag privileged user (IT term)", () => {
+    const r = scanner.scan("The privileged user logged in via SSH");
+    assert.ok(!r.flags.some(f => f.pattern_name === "privilege_marker"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3: Industry risk rules
+// ---------------------------------------------------------------------------
+
+describe("v3 industry risk rules", () => {
+  const engine = RiskEngine.default();
+
+  it("clinical_order HIGH", () => {
+    assert.equal(engine.assess("mcp__epic__prescribe", {}), RiskLevel.HIGH);
+  });
+
+  it("procurement_order HIGH", () => {
+    assert.equal(engine.assess("mcp__sap__purchase_order", {}), RiskLevel.HIGH);
+  });
+
+  it("shipment_divert HIGH", () => {
+    assert.equal(engine.assess("mcp__logistics__reroute", {}), RiskLevel.HIGH);
+  });
+
+  it("termination_ops HIGH", () => {
+    assert.equal(engine.assess("mcp__workday__offboard", {}), RiskLevel.HIGH);
+  });
+
+  it("litigation_hold HIGH", () => {
+    assert.equal(engine.assess("mcp__legal__delete_hold", {}), RiskLevel.HIGH);
+  });
+
+  it("iac_destructive HIGH", () => {
+    assert.equal(engine.assess("Bash", { command: "terraform destroy -auto-approve" }), RiskLevel.HIGH);
+  });
+
+  it("payment_release HIGH", () => {
+    assert.equal(engine.assess("mcp__stripe__create_payout", {}), RiskLevel.HIGH);
+  });
+
+  it("social_media_post HIGH", () => {
+    assert.equal(engine.assess("mcp__twitter__create_tweet", {}), RiskLevel.HIGH);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3: Params summary in audit
+// ---------------------------------------------------------------------------
+
+describe("v3 audit params_summary", () => {
+  it("MCP check includes params_summary", () => {
+    const checker = new ScopeChecker(new ScopeBoundary());
+    const r = checker.check("mcp__stripe__create_charge", { amount: 5000, customer_id: "cus_123" });
+    assert.ok(r.params_summary);
+    assert.equal(r.params_summary!.mcp_server, "stripe");
+    assert.equal(r.params_summary!.mcp_operation, "create_charge");
+    assert.equal(r.params_summary!.transaction_amount, "5000");
+    assert.ok(r.params_summary!.resource_id_hash);
+    assert.equal(r.params_summary!.resource_id_hash!.length, 16); // truncated hash
+  });
+
+  it("audit record persists MCP context", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-v3-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({
+      verdict: CheckVerdict.WARN,
+      tool: "mcp__stripe__create_charge",
+      target: "",
+      reason: "write op",
+      risk_level: RiskLevel.MEDIUM,
+      scope_violation: false,
+      params_summary: {
+        mcp_server: "stripe",
+        mcp_operation: "create_charge",
+        resource_id_hash: "abc123def456",
+        transaction_amount: "5000",
+        operation_scope: "single",
+      },
+    });
+    const entries = log.read();
+    assert.equal(entries[0].mcp_server, "stripe");
+    assert.equal(entries[0].mcp_operation, "create_charge");
+    assert.equal(entries[0].resource_id_hash, "abc123def456");
+    assert.equal(entries[0].transaction_amount, "5000");
+    assert.equal(entries[0].operation_scope, "single");
+    rmSync(tmp, { recursive: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3: Audit export with redaction
+// ---------------------------------------------------------------------------
+
+describe("v3 audit export", () => {
+  it("export without redaction includes HMAC", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-exp-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({ verdict: CheckVerdict.ALLOW, tool: "Read", target: "f.ts", reason: "", risk_level: RiskLevel.LOW, scope_violation: false });
+    const exported = log.export();
+    assert.ok(exported.includes("hmac"));
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("export with redaction strips HMAC and redacts sensitive target", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-exp-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({ verdict: CheckVerdict.WARN, tool: "Read", target: "SSN: 123-45-6789", reason: "", risk_level: RiskLevel.HIGH, scope_violation: false });
+    const exported = log.export({ redact: true });
+    assert.ok(!exported.includes("123-45-6789"));
+    assert.ok(exported.includes("[REDACTED:ssn]"));
+    assert.ok(!exported.includes('"hmac"'));
+    rmSync(tmp, { recursive: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3: Compliance presets
+// ---------------------------------------------------------------------------
+
+describe("v3 compliance presets", () => {
+  it("clinical preset includes HIPAA + clinical rules", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-pol-"));
+    const p = join(tmp, "policy.json");
+    writeFileSync(p, JSON.stringify({ compliance_mode: "clinical" }));
+    const loaded = loadPolicy(p);
+    assert.equal(loaded.require_scope_boundary, true);
+    assert.ok(loaded.extra_rules!.some(r => r.name === "hipaa_phi_export"));
+    assert.ok(loaded.extra_rules!.some(r => r.name === "clinical_medication_order"));
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("hr preset has termination rule", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-pol-"));
+    const p = join(tmp, "policy.json");
+    writeFileSync(p, JSON.stringify({ compliance_mode: "hr" }));
+    const loaded = loadPolicy(p);
+    assert.ok(loaded.extra_rules!.some(r => r.name === "hr_termination"));
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("research preset allows MEDIUM auto-allow", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-pol-"));
+    const p = join(tmp, "policy.json");
+    writeFileSync(p, JSON.stringify({ compliance_mode: "research" }));
+    const loaded = loadPolicy(p);
+    assert.equal(loaded.max_risk_auto_allow, "medium");
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("supply_chain_sap preset has SAP transaction codes", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-pol-"));
+    const p = join(tmp, "policy.json");
+    writeFileSync(p, JSON.stringify({ compliance_mode: "supply_chain_sap" }));
+    const loaded = loadPolicy(p);
+    assert.ok(loaded.extra_rules!.some(r => r.name === "sap_mm_mutation"));
+    rmSync(tmp, { recursive: true });
   });
 });
