@@ -1313,6 +1313,40 @@ describe("v3 MCP server glob matching", () => {
 });
 
 // ---------------------------------------------------------------------------
+// v3: CJK keyword boundary matching
+// ---------------------------------------------------------------------------
+
+describe("v3 CJK keyword matching", () => {
+  it("matches Chinese keyword via substring", () => {
+    const b = new ScopeBoundary({
+      resources: { escalation_keywords: ["机密"] },
+    });
+    assert.deepEqual(b.matchEscalationKeywords("这份文件是机密信息"), ["机密"]);
+  });
+
+  it("matches Japanese keyword via substring", () => {
+    const b = new ScopeBoundary({
+      resources: { blocked_keywords: ["秘密"] },
+    });
+    assert.deepEqual(b.matchBlockedKeywords("これは秘密です"), ["秘密"]);
+  });
+
+  it("matches Korean keyword via substring", () => {
+    const b = new ScopeBoundary({
+      resources: { escalation_keywords: ["비밀"] },
+    });
+    assert.deepEqual(b.matchEscalationKeywords("이 문서는 비밀입니다"), ["비밀"]);
+  });
+
+  it("does not match CJK keyword when absent", () => {
+    const b = new ScopeBoundary({
+      resources: { blocked_keywords: ["機密"] },
+    });
+    assert.deepEqual(b.matchBlockedKeywords("公開文書です"), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // v3: MCP resource rules (per-server operation control)
 // ---------------------------------------------------------------------------
 
@@ -1440,6 +1474,50 @@ describe("v3 industry risk rules", () => {
   it("social_media_post HIGH", () => {
     assert.equal(engine.assess("mcp__twitter__create_tweet", {}), RiskLevel.HIGH);
   });
+
+  it("iac_apply MEDIUM (terraform apply)", () => {
+    assert.equal(engine.assess("Bash", { command: "terraform apply -auto-approve" }), RiskLevel.MEDIUM);
+  });
+
+  it("crm_merge_ops HIGH (merge_contact)", () => {
+    assert.equal(engine.assess("mcp__hubspot__merge_contact", {}), RiskLevel.HIGH);
+  });
+
+  it("enrollment_mass HIGH (add_to_sequence)", () => {
+    assert.equal(engine.assess("mcp__hubspot__add_to_sequence", {}), RiskLevel.HIGH);
+  });
+
+  it("marketing_list_destruct HIGH (bulk_unsubscribe)", () => {
+    assert.equal(engine.assess("mcp__mailchimp__bulk_unsubscribe", {}), RiskLevel.HIGH);
+  });
+
+  it("inventory_adjust HIGH", () => {
+    assert.equal(engine.assess("mcp__sap__inventory_adjust", {}), RiskLevel.HIGH);
+  });
+
+  it("financial_reversal HIGH (void check)", () => {
+    assert.equal(engine.assess("mcp__netsuite__void_check", {}), RiskLevel.HIGH);
+  });
+
+  it("tax_adjustment HIGH", () => {
+    assert.equal(engine.assess("mcp__sap__tax_reversal", {}), RiskLevel.HIGH);
+  });
+
+  it("support_bulk_ops HIGH (bulk_assign)", () => {
+    assert.equal(engine.assess("mcp__zendesk__bulk_assign", {}), RiskLevel.HIGH);
+  });
+
+  it("clinical_procedure HIGH (schedule_surgery)", () => {
+    assert.equal(engine.assess("mcp__epic__schedule_surgery", {}), RiskLevel.HIGH);
+  });
+
+  it("helm upgrade triggers iac_apply MEDIUM", () => {
+    assert.equal(engine.assess("Bash", { command: "helm upgrade my-release ./chart" }), RiskLevel.MEDIUM);
+  });
+
+  it("kubectl apply triggers iac_apply MEDIUM", () => {
+    assert.equal(engine.assess("Bash", { command: "kubectl apply -f deployment.yaml" }), RiskLevel.MEDIUM);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1511,6 +1589,36 @@ describe("v3 audit export", () => {
     assert.ok(!exported.includes("123-45-6789"));
     assert.ok(exported.includes("[REDACTED:ssn]"));
     assert.ok(!exported.includes('"hmac"'));
+    rmSync(tmp, { recursive: true });
+  });
+
+  it("export with redaction strips sensitive data from transaction_amount", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "sg-audit-exp-"));
+    const p = join(tmp, "audit.jsonl");
+    const log = new AuditLog(p);
+    log.record({
+      verdict: CheckVerdict.WARN,
+      tool: "mcp__stripe__create_charge",
+      target: "customer SSN: 123-45-6789",
+      reason: "write op",
+      risk_level: RiskLevel.MEDIUM,
+      scope_violation: false,
+      params_summary: {
+        mcp_server: "stripe",
+        mcp_operation: "create_charge",
+        resource_id_hash: "abc123def456",
+        transaction_amount: "5000",
+        operation_scope: "single",
+      },
+    });
+    const exported = log.export({ redact: true });
+    // Target should be redacted
+    assert.ok(!exported.includes("123-45-6789"));
+    // MCP context should be preserved (not sensitive)
+    assert.ok(exported.includes("stripe"));
+    assert.ok(exported.includes("create_charge"));
+    // resource_id_hash is already hashed, safe to keep
+    assert.ok(exported.includes("abc123def456"));
     rmSync(tmp, { recursive: true });
   });
 });
